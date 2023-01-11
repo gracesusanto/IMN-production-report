@@ -1,0 +1,12 @@
+alembic
+fastapi
+fastapi-sqlalchemy
+wheel
+pandas
+psycopg2
+pydantic
+pydantic-sqlalchemy
+python-dotenv
+sqlalchemy
+strawberry-sqlalchemy-mapper
+uvicorn
