@@ -1,8 +1,8 @@
-"""New Migration
+"""New DB
 
-Revision ID: 86e74951f9e6
+Revision ID: 1f80954185d3
 Revises: 
-Create Date: 2023-01-09 07:56:29.487354
+Create Date: 2023-01-26 09:22:29.952823
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '86e74951f9e6'
+revision = '1f80954185d3'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -79,6 +79,8 @@ def upgrade():
     sa.Column('mesin_id', sa.String(), nullable=False),
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
+    sa.Column('reject', sa.Integer(), nullable=True),
+    sa.Column('rework', sa.Integer(), nullable=True),
     sa.Column('downtime_category', sa.String(), nullable=True),
     sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
@@ -90,21 +92,12 @@ def upgrade():
     sa.Column('operator_id', sa.String(), nullable=False),
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
+    sa.Column('reject', sa.Integer(), nullable=True),
+    sa.Column('rework', sa.Integer(), nullable=True),
     sa.Column('downtime_category', sa.String(), nullable=True),
     sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
     sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
     sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('continued_downtime_tooling',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('tooling_id', sa.String(), nullable=False),
-    sa.Column('start_time_id', sa.Integer(), nullable=False),
-    sa.Column('stop_time_id', sa.Integer(), nullable=False),
-    sa.Column('downtime_category', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
-    sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
-    sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('last_downtime_mesin',
@@ -112,6 +105,8 @@ def upgrade():
     sa.Column('mesin_id', sa.String(), nullable=False),
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
+    sa.Column('reject', sa.Integer(), nullable=True),
+    sa.Column('rework', sa.Integer(), nullable=True),
     sa.Column('downtime_category', sa.String(), nullable=True),
     sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
@@ -123,26 +118,17 @@ def upgrade():
     sa.Column('operator_id', sa.String(), nullable=False),
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
+    sa.Column('reject', sa.Integer(), nullable=True),
+    sa.Column('rework', sa.Integer(), nullable=True),
     sa.Column('downtime_category', sa.String(), nullable=True),
     sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
     sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
     sa.ForeignKeyConstraint(['stop_time_id'], ['start.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('last_downtime_tooling',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('tooling_id', sa.String(), nullable=False),
-    sa.Column('start_time_id', sa.Integer(), nullable=False),
-    sa.Column('stop_time_id', sa.Integer(), nullable=False),
-    sa.Column('downtime_category', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
-    sa.ForeignKeyConstraint(['stop_time_id'], ['start.id'], ),
-    sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('mesin_status',
     sa.Column('id', sa.String(), nullable=False),
-    sa.Column('status', sa.Enum('RUNNING', 'IDLE', name='status'), nullable=True),
+    sa.Column('status', sa.Enum('RUNNING', 'IDLE', 'SETUP', name='status'), nullable=True),
     sa.Column('last_start_id', sa.Integer(), nullable=False),
     sa.Column('last_stop_id', sa.Integer(), nullable=False),
     sa.Column('last_tooling_id', sa.String(), nullable=False),
@@ -161,6 +147,8 @@ def upgrade():
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
     sa.Column('output', sa.Integer(), nullable=True),
+    sa.Column('reject', sa.Integer(), nullable=True),
+    sa.Column('rework', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['start_time_id'], ['start.id'], ),
     sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
@@ -172,20 +160,11 @@ def upgrade():
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
     sa.Column('output', sa.Integer(), nullable=True),
+    sa.Column('reject', sa.Integer(), nullable=True),
+    sa.Column('rework', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
     sa.ForeignKeyConstraint(['start_time_id'], ['start.id'], ),
     sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('utility_tooling',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('tooling_id', sa.String(), nullable=False),
-    sa.Column('start_time_id', sa.Integer(), nullable=False),
-    sa.Column('stop_time_id', sa.Integer(), nullable=False),
-    sa.Column('output', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['start_time_id'], ['start.id'], ),
-    sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
-    sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###
@@ -193,15 +172,12 @@ def upgrade():
 
 def downgrade():
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_table('utility_tooling')
     op.drop_table('utility_operator')
     op.drop_table('utility_mesin')
     op.drop_index(op.f('ix_mesin_status_id'), table_name='mesin_status')
     op.drop_table('mesin_status')
-    op.drop_table('last_downtime_tooling')
     op.drop_table('last_downtime_operator')
     op.drop_table('last_downtime_mesin')
-    op.drop_table('continued_downtime_tooling')
     op.drop_table('continued_downtime_operator')
     op.drop_table('continued_downtime_mesin')
     op.drop_table('stop')

@@ -1,14 +1,17 @@
 import os
+import io
 
 import fastapi
 import uvicorn
 from dotenv import load_dotenv
 from fastapi_sqlalchemy import DBSessionMiddleware, db
 
+
 import business_logic
 import models
 import schema
 from database import Sessioner
+import generate_report
 
 load_dotenv(".env")
 
@@ -21,13 +24,23 @@ app.add_middleware(DBSessionMiddleware, db_url=os.environ["DATABASE_URL"])
 async def root():
     return {"message": "Hello World"}
 
-
 @app.post("/add-tooling/", response_model=schema.Tooling)
 def add_tooling(tooling: schema.Tooling, session=Sessioner):
     tooling = models.Tooling(**dict(tooling))
     session.add(tooling)
     session.commit()
     return tooling
+
+@app.post("/report/mesin")
+def get_report(request: schema.ReportRequest):
+    date_time = request.date if request.date is not None else generate_report.get_curr_datetime()
+    shift = request.shift if request.shift is not None else generate_report.get_curr_shift()
+
+    df, filename = generate_report.get_mesin_report(date_time, shift)
+    response = fastapi.responses.StreamingResponse(io.StringIO(df.to_csv(index=False)), media_type="text/csv")
+
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
 
 @app.get("/tooling/")
 def get_tooling(session=Sessioner):
@@ -58,6 +71,21 @@ def get_last_downtime_mesin(session=Sessioner):
 def get_continued_downtime_mesin(session=Sessioner):
     continued_downtime_mesin = session.query(models.ContinuedDowntimeMesin).all()
     return continued_downtime_mesin
+
+@app.get("/utility_operator/")
+def get_utility_operator(session=Sessioner):
+    utility_operator = session.query(models.UtilityOperator).all()
+    return utility_operator
+
+@app.get("/last_downtime_operator/")
+def get_last_downtime_operator(session=Sessioner):
+    last_downtime_operator = session.query(models.LastDowntimeOperator).all()
+    return last_downtime_operator
+
+@app.get("/continued_downtime_operator/")
+def get_continued_downtime_operator(session=Sessioner):
+    continued_downtime_operator = session.query(models.ContinuedDowntimeOperator).all()
+    return continued_downtime_operator
 
 @app.get("/mesin_status/")
 def get_mesin_status(session=Sessioner):
@@ -108,6 +136,8 @@ def post_activity(activity: schema.Activity, session=Sessioner):
                 tooling_id=activity.tooling_id, 
                 mesin_id=activity.mesin_id, 
                 operator_id=activity.operator_id,
+                reject=activity.reject,
+                rework=activity.rework,
                 session=session)
 
         case schema.ActivityType.FIRST_STOP:
@@ -116,6 +146,8 @@ def post_activity(activity: schema.Activity, session=Sessioner):
                 mesin_id=activity.mesin_id, 
                 operator_id=activity.operator_id,
                 output=activity.output,
+                reject=activity.reject,
+                rework=activity.rework,
                 downtime_category=activity.category_downtime,
                 session=session
             )
@@ -125,6 +157,8 @@ def post_activity(activity: schema.Activity, session=Sessioner):
                 tooling_id=activity.tooling_id, 
                 mesin_id=activity.mesin_id, 
                 operator_id=activity.operator_id,
+                reject=activity.reject,
+                rework=activity.rework,
                 downtime_category=activity.category_downtime,
                 session=session
             )

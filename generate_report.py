@@ -1,15 +1,15 @@
 from datetime import datetime, time
 
 import pandas
-import pytz
-import sqlalchemy
+import sqlalchemy as sa
 from sqlalchemy.orm import aliased
+import pytz
 
 import database
 import models
 
 
-def is_time_between(begin_time, end_time, check_time=None):
+def _is_time_between(begin_time, end_time, check_time=None):
     # If check time is not given, default to current UTC time
     check_time = check_time or datetime.utcnow().time()
     if begin_time < end_time:
@@ -17,28 +17,47 @@ def is_time_between(begin_time, end_time, check_time=None):
     else: # crosses midnight
         return check_time >= begin_time or check_time <= end_time
 
-def calculate_shift(row):
+def _calculate_shift(row):
     date_time = datetime.strptime(row, '%m/%d/%Y %H:%M:%S')
+    return _calculate_shift_from_datetime(date_time)
+
+def _calculate_shift_from_datetime(date_time):
     comp_time = date_time.time()
     
     if date_time.isoweekday() == 7: # Sunday
         return 3
     elif date_time.isoweekday() == 6: # Saturday
-        if is_time_between(time(7,00), time(12,00), comp_time):
+        if _is_time_between(time(7,00), time(12,00), comp_time):
             return 1
-        elif is_time_between(time(12,1), time(17,00), comp_time):
+        elif _is_time_between(time(12,1), time(17,00), comp_time):
             return 2
-        elif is_time_between(time(17,1), time(23,00), comp_time):
+        elif _is_time_between(time(17,1), time(23,00), comp_time):
             return 3
     elif date_time.isoweekday() < 6: # Weekday
-        if is_time_between(time(7,00), time(15,00), comp_time):
+        if _is_time_between(time(7,00), time(15,00), comp_time):
             return 1
-        elif is_time_between(time(15,1), time(23,00), comp_time):
+        elif _is_time_between(time(15,1), time(23,00), comp_time):
             return 2
-        elif is_time_between(time(23,1), time(7,00), comp_time):
+        elif _is_time_between(time(23,1), time(7,00), comp_time):
             return 3
 
-def convert_seconds(seconds):
+def get_curr_datetime():
+    return datetime.now(pytz.timezone('Asia/Jakarta')).date()
+def get_curr_shift():
+    return _calculate_shift_from_datetime(datetime.now())
+
+def _get_csv_filename(type, date_time=None, shift=None):
+    if date_time == None:
+        date_time = get_curr_datetime()
+    if shift == None:
+        shift = get_curr_shift()
+    return f"result_{type}_{date_time}_shift_{shift}.csv"
+
+def _get_csv_folder(type, date_time=None, shift=None):
+    filename = _get_csv_filename(type, date_time, shift)
+    return f"report/{type}/{filename}"
+
+def _convert_seconds(seconds):
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
 
@@ -49,12 +68,14 @@ def convert_seconds(seconds):
     else:
         return f'{s:d}sec'
 
+
+
 engine = database.get_engine()
-session = sqlalchemy.orm.sessionmaker(autocommit=False, autoflush=False,
+session = sa.orm.sessionmaker(autocommit=False, autoflush=False,
                                       bind=engine)()
 
 # col_order = ['MC', 'Operator', 'Part No', 'Part Name', 'Prs', 'Start', 'Stop', 'Desc', 'Qty']
-col_order = ['MC', 'Operator', 'Part No', 'Start', 'Stop', 'Desc', 'Qty']
+col_order = ['MC', 'Operator', 'Part No', 'Start', 'Stop', 'Desc', 'Qty', 'Reject', 'Rework']
 
 def query_continued_downtime():
     continued_downtime_start = aliased(models.Stop)
@@ -75,6 +96,8 @@ def query_continued_downtime():
             continued_downtime_start.timestamp.label("Start"), 
             continued_downtime_stop.timestamp.label("Stop"),
             models.ContinuedDowntimeMesin.downtime_category.label("Desc"),
+            models.ContinuedDowntimeMesin.reject.label("Reject"),
+            models.ContinuedDowntimeMesin.rework.label("Rework"),
         ).\
         statement
 
@@ -82,7 +105,7 @@ def query_continued_downtime():
         sql = query,
         con = engine
     )
-    df['Qty'] = ""
+    df['Qty'] = 0
     return df[col_order]
 
 def query_last_downtime():
@@ -104,6 +127,8 @@ def query_last_downtime():
             last_downtime_start.timestamp.label("Start"), 
             last_downtime_stop.timestamp.label("Stop"),
             models.LastDowntimeMesin.downtime_category.label("Desc"),
+            models.LastDowntimeMesin.reject.label("Reject"),
+            models.LastDowntimeMesin.rework.label("Rework"),
         ).\
         statement
 
@@ -111,7 +136,7 @@ def query_last_downtime():
         sql = query,
         con = engine
     )
-    df['Qty'] = ""
+    df['Qty'] = 0
     return df[col_order]
 
 def query_utility():
@@ -133,6 +158,8 @@ def query_utility():
             utility_start.timestamp.label("Start"), 
             utility_stop.timestamp.label("Stop"),
             models.UtilityMesin.output.label("Qty"),
+            models.UtilityMesin.reject.label("Reject"),
+            models.UtilityMesin.rework.label("Rework"),
         ).\
         statement
 
@@ -140,23 +167,45 @@ def query_utility():
         sql = query,
         con = engine
     )
-    df['Desc'] = 'U : Utility'
+    df['Desc'] = 'U: Utility'
     return df[col_order]
 
-df = pandas.concat([
-    query_utility(), 
-    query_continued_downtime(), 
-    query_last_downtime()
-    ], axis=0).sort_values(by=['MC', 'Start']).reset_index(drop=True)
+def get_mesin_report(date_time=None, shift=None):
+    if date_time == None:
+        date_time = get_curr_datetime()
+    if shift == None:
+        shift = get_curr_shift()
 
-df['Start'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
-df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
-df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
-df['Duration'] = df['Duration'].dt.total_seconds()
-df['Duration'] = df['Duration'].apply(lambda x: convert_seconds(x))
-df['Shift'] = df['Start'].apply(lambda x: calculate_shift(x))
-print(df)
-df.to_csv("result_mesin.csv")
+    df = pandas.concat([
+        query_utility(), 
+        query_continued_downtime(), 
+        query_last_downtime()
+        ], axis=0).sort_values(by=['MC', 'Start']).reset_index(drop=True)
+
+    df['Tanggal'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y')
+    df['StartTime'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
+    df['StopTime'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
+
+    df['Start'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
+    df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
+    df['Shift'] = df['Start'].apply(lambda x: _calculate_shift(x))
+
+    df = df.loc[df['Tanggal'] == date_time.strftime('%m/%d/%Y')]
+    df = df.loc[df['Shift'] == shift]
+    
+    df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
+    df['Duration'] = df['Duration'].dt.total_seconds()
+    df['Duration'] = df['Duration'].apply(lambda x: _convert_seconds(x))
+    df = df.fillna(0)
+    df['Qty'] = df['Qty'].astype(int)
+    df['Reject'] = df['Reject'].astype(int)
+    df['Rework'] = df['Rework'].astype(int)
+    df.drop(['Start', 'Stop'], axis=1, inplace=True)
+    header = ['MC', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'Part No', 'Operator', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
+    df = df[header]
+    print(df)
+    df.to_csv(_get_csv_folder("mesin", date_time, shift))
+    return df, _get_csv_filename("mesin", date_time, shift)
 
 
 def query_continued_downtime_operator():
@@ -176,6 +225,8 @@ def query_continued_downtime_operator():
             continued_downtime_start.timestamp.label("Start"), 
             continued_downtime_stop.timestamp.label("Stop"),
             models.ContinuedDowntimeOperator.downtime_category.label("Desc"),
+            models.ContinuedDowntimeOperator.reject.label("Reject"),
+            models.ContinuedDowntimeOperator.rework.label("Rework"),
         ).\
         statement
 
@@ -183,7 +234,7 @@ def query_continued_downtime_operator():
         sql = query,
         con = engine
     )
-    df['Qty'] = ""
+    df['Qty'] = 0
     return df
 
 def query_last_downtime_operator():
@@ -203,6 +254,8 @@ def query_last_downtime_operator():
             last_downtime_start.timestamp.label("Start"), 
             last_downtime_stop.timestamp.label("Stop"),
             models.LastDowntimeOperator.downtime_category.label("Desc"),
+            models.LastDowntimeOperator.reject.label("Reject"),
+            models.LastDowntimeOperator.rework.label("Rework"),
         ).\
         statement
 
@@ -210,7 +263,7 @@ def query_last_downtime_operator():
         sql = query,
         con = engine
     )
-    df['Qty'] = ""
+    df['Qty'] = 0
     return df
 
 def query_utility_operator():
@@ -230,6 +283,8 @@ def query_utility_operator():
             utility_start.timestamp.label("Start"), 
             utility_stop.timestamp.label("Stop"),
             models.UtilityOperator.output.label("Qty"),
+            models.UtilityOperator.reject.label("Reject"),
+            models.UtilityOperator.rework.label("Rework"),
         ).\
         statement
 
@@ -237,142 +292,62 @@ def query_utility_operator():
         sql = query,
         con = engine
     )
-    df['Desc'] = 'U : Utility'
+    df['Desc'] = 'U: Utility'
     return df
 
-df = pandas.concat([
-    query_utility_operator(), 
-    query_continued_downtime_operator(), 
-    query_last_downtime_operator()
-    ], axis=0).sort_values(by=['Operator', 'Start']).reset_index(drop=True)
+def get_operator_report(date_time=None, shift=None):
+    if date_time == None:
+        date_time = get_curr_datetime()
+    if shift == None:
+        shift = get_curr_shift()
 
-df['Start'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
-df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
+    df = pandas.concat([
+        query_utility_operator(), 
+        query_continued_downtime_operator(), 
+        query_last_downtime_operator()
+        ], axis=0).sort_values(by=['Operator', 'Start']).reset_index(drop=True)
 
-for index, row in df.iterrows():
-    if index == 0:
-        continue
-    if ((df.loc[index]['Operator'] == df.loc[index-1]['Operator']) and (df.loc[index]['Start'] != df.loc[index-1]['Stop'])):
-        insert_row = {
-            'Operator': df.loc[index]['Operator'], 
-            'Start': df.loc[index-1]['Stop'], 
-            'Stop': df.loc[index]['Start'],
-            'Desc': 'NK : Not Known'
-        }
-        df = pandas.concat([df, pandas.DataFrame([insert_row])])
-        # df = pandas.concat([df, new_df], axis=0, ignore_index=True)
-        # new_rowdf = df.append({
-        #     'Operator': df.loc[index]['Operator'], 
-        #     'Start': df.loc[index-1]['Stop'], 
-        #     'Stop': df.loc[index]['Start'],
-        #     'Desc': 'NK : Not Known'
-        # }, ignore_index=True)
-df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
-df['Duration'] = df['Duration'].dt.total_seconds()
-df['Duration'] = df['Duration'].apply(lambda x: convert_seconds(x))
-df = df.sort_values(by=['Operator', 'Start']).reset_index(drop=True)
-df['Shift'] = df['Start'].apply(lambda x: calculate_shift(x))
-print(df)
-df.to_csv("result_operator.csv")
+    df['Tanggal'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y')
+    df['StartTime'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
+    df['StopTime'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
 
+    df['Start'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
+    df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
+    df['Shift'] = df['Start'].apply(lambda x: _calculate_shift(x))
+    
+    df = df.loc[df['Tanggal'] == date_time.strftime('%m/%d/%Y')]
+    df = df.loc[df['Shift'] == shift]
 
+    for index, row in df.iterrows():
+        if index == 0:
+            continue
+        if ((df.loc[index]['Operator'] == df.loc[index-1]['Operator']) and 
+        (df.loc[index]['Start'] != df.loc[index-1]['Stop']) and 
+        df.loc[index]['Desc'][:2] != "NP"):
+            insert_row = {
+                'Operator': df.loc[index]['Operator'], 
+                'Start': df.loc[index-1]['Stop'], 
+                'Stop': df.loc[index]['Start'],
+                'Desc': 'NK : Not Known'
+            }
+            df = pandas.concat([df, pandas.DataFrame([insert_row])])
+    df.drop(df.loc[df['Desc']=="NP: No Plan"].index, inplace=True)
+    df = df.sort_values(by=['Operator', 'Start']).reset_index(drop=True)
 
+    df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
+    df['Duration'] = df['Duration'].dt.total_seconds()
+    df['Duration'] = df['Duration'].apply(lambda x: _convert_seconds(x))
+    df = df.sort_values(by=['Operator', 'Start']).reset_index(drop=True)
+    df = df.fillna(0)
+    df['Qty'] = df['Qty'].astype(int)
+    df['Reject'] = df['Reject'].astype(int)
+    df['Rework'] = df['Rework'].astype(int)
+    df.drop(['Start', 'Stop'], axis=1, inplace=True)
+    header = ['Operator', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'MC', 'Part No', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
+    df = df[header]
+    print(df)
+    df.to_csv(_get_csv_folder("operator", date_time, shift))
+    return df, _get_csv_filename("operator", date_time, shift)
 
-
-
-# def query_continued_downtime_tooling():
-#     continued_downtime_start = aliased(models.Stop)
-#     continued_downtime_stop = aliased(models.Stop)
-
-#     query = session.query(models.ContinuedDowntimeTooling).\
-#         join(models.Tooling).\
-#         join(continued_downtime_start, models.ContinuedDowntimeTooling.start_time).\
-#         join(continued_downtime_stop, models.ContinuedDowntimeTooling.stop_time).\
-#         join(models.Mesin, models.Mesin.id == continued_downtime_start.mesin_id).\
-#         join(models.Operator, models.Operator.id == continued_downtime_start.operator_id).\
-#         with_entities(
-#             models.Tooling.part_name.label("Part Name"),
-#             models.Mesin.name.label("MC"),
-#             models.Operator.name.label("Operator"),
-#             continued_downtime_start.timestamp.label("Start"), 
-#             continued_downtime_stop.timestamp.label("Stop"),
-#             models.ContinuedDowntimeTooling.downtime_category.label("Desc"),
-#         ).\
-#         statement
-
-#     df = pandas.read_sql(
-#         sql = query,
-#         con = engine
-#     )
-#     df['Qty'] = ""
-#     return df
-
-# def query_last_downtime_tooling():
-#     last_downtime_start = aliased(models.Stop)
-#     last_downtime_stop = aliased(models.Start)
-
-#     query = session.query(models.LastDowntimeTooling).\
-#         join(models.Tooling).\
-#         join(last_downtime_start, models.LastDowntimeTooling.start_time).\
-#         join(last_downtime_stop, models.LastDowntimeTooling.stop_time).\
-#         join(models.Mesin, models.Mesin.id == last_downtime_start.mesin_id).\
-#         join(models.Operator, models.Operator.id == last_downtime_start.operator_id).\
-#         with_entities(
-#             models.Tooling.part_name.label("Part Name"),
-#             models.Mesin.name.label("MC"),
-#             models.Operator.name.label("Operator"),
-#             last_downtime_start.timestamp.label("Start"), 
-#             last_downtime_stop.timestamp.label("Stop"),
-#             models.LastDowntimeTooling.downtime_category.label("Desc"),
-#         ).\
-#         statement
-
-#     df = pandas.read_sql(
-#         sql = query,
-#         con = engine
-#     )
-#     df['Qty'] = ""
-#     return df
-
-# def query_utility_tooling():
-#     utility_start = aliased(models.Start)
-#     utility_stop = aliased(models.Stop)
-
-#     query = session.query(models.UtilityTooling).\
-#         join(models.Tooling).\
-#         join(utility_start, models.UtilityTooling.start_time).\
-#         join(utility_stop, models.UtilityTooling.stop_time).\
-#         join(models.Mesin, models.Mesin.id == utility_start.mesin_id).\
-#         join(models.Operator, models.Operator.id == utility_start.operator_id).\
-#         with_entities(
-#             models.Tooling.part_name.label("Part Name"),
-#             models.Mesin.name.label("MC"),
-#             models.Operator.name.label("Operator"),
-#             utility_start.timestamp.label("Start"), 
-#             utility_stop.timestamp.label("Stop"),
-#             models.UtilityTooling.output.label("Qty"),
-#         ).\
-#         statement
-
-#     df = pandas.read_sql(
-#         sql = query,
-#         con = engine
-#     )
-#     df['Desc'] = 'U'
-#     return df
-
-# df = pandas.concat([
-#     query_utility_tooling(), 
-#     query_continued_downtime_tooling(), 
-#     query_last_downtime_tooling()
-#     ], axis=0).sort_values(by=['Part Name', 'Start']).reset_index(drop=True)
-
-# df['Start'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
-# df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
-# print(df)
-# df.to_csv("result_tooling.csv")
-
-# print(pandas.read_sql(
-#         sql = session.query(models.ContinuedDowntimeTooling).statement,
-#         con = engine
-#     ))
+get_mesin_report(shift=3)
+get_operator_report()

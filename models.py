@@ -79,6 +79,8 @@ class UtilityMesin(Base):
     start_time = sa.orm.relationship("Start", backref="utility_mesin_start", uselist=False)
     stop_time = sa.orm.relationship("Stop", backref="utility_mesin_stop", uselist=False)
     output = sa.Column(sa.Integer)
+    reject = sa.Column(sa.Integer, nullable=True)
+    rework = sa.Column(sa.Integer, nullable=True)
 
 class LastDowntimeMesin(Base):
     __tablename__ = "last_downtime_mesin"
@@ -88,6 +90,8 @@ class LastDowntimeMesin(Base):
     stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("start.id"), nullable=False)
     start_time = sa.orm.relationship("Stop", backref="last_downtime_mesin_start", uselist=False)
     stop_time = sa.orm.relationship("Start", backref="last_downtime_mesin_stop", uselist=False)
+    reject = sa.Column(sa.Integer, nullable=True)
+    rework = sa.Column(sa.Integer, nullable=True)
     downtime_category = sa.Column(sa.String)
 
 class ContinuedDowntimeMesin(Base):
@@ -98,6 +102,8 @@ class ContinuedDowntimeMesin(Base):
     stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
     start_time = sa.orm.relationship("Stop", foreign_keys=[start_time_id], backref="continued_downtime_mesin_start", uselist=False)
     stop_time = sa.orm.relationship("Stop", foreign_keys=[stop_time_id], backref="continued_downtime_mesin_stop", uselist=False)
+    reject = sa.Column(sa.Integer, nullable=True)
+    rework = sa.Column(sa.Integer, nullable=True)
     downtime_category = sa.Column(sa.String)
 
 @strawberry.enum
@@ -106,6 +112,7 @@ class Status(Enum):
 
     RUNNING = "RUNNING"
     IDLE = "IDLE"
+    SETUP = "SETUP"
 
 class MesinStatus(Base):
     __tablename__ = "mesin_status"
@@ -129,6 +136,8 @@ class UtilityOperator(Base):
     start_time = sa.orm.relationship("Start", backref="utility_operator_start", uselist=False)
     stop_time = sa.orm.relationship("Stop", backref="utility_operator_stop", uselist=False)
     output = sa.Column(sa.Integer)
+    reject = sa.Column(sa.Integer, nullable=True)
+    rework = sa.Column(sa.Integer, nullable=True)
 
 class LastDowntimeOperator(Base):
     __tablename__ = "last_downtime_operator"
@@ -138,6 +147,8 @@ class LastDowntimeOperator(Base):
     stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("start.id"), nullable=False)
     start_time = sa.orm.relationship("Stop", backref="last_downtime_operator_start", uselist=False)
     stop_time = sa.orm.relationship("Start", backref="last_downtime_operator_stop", uselist=False)
+    reject = sa.Column(sa.Integer, nullable=True)
+    rework = sa.Column(sa.Integer, nullable=True)
     downtime_category = sa.Column(sa.String)
 
 class ContinuedDowntimeOperator(Base):
@@ -148,4 +159,6 @@ class ContinuedDowntimeOperator(Base):
     stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
     start_time = sa.orm.relationship("Stop", foreign_keys=[start_time_id], backref="continued_downtime_operator_start", uselist=False)
     stop_time = sa.orm.relationship("Stop", foreign_keys=[stop_time_id], backref="continued_downtime_operator_stop", uselist=False)
+    reject = sa.Column(sa.Integer, nullable=True)
+    rework = sa.Column(sa.Integer, nullable=True)
     downtime_category = sa.Column(sa.String)

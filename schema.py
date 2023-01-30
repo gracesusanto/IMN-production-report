@@ -1,10 +1,12 @@
 from enum import Enum
 from typing import Union
+from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 
 import models
+from generate_report import get_curr_datetime, get_curr_shift
 
 Mesin = sqlalchemy_to_pydantic(models.Mesin, exclude=['id', 'time_created', 'time_updated'])
 
@@ -27,4 +29,11 @@ class Activity(BaseModel):
     operator_id: str
     category_downtime: Union[str, None]
     output: Union[int, None] = None
+    reject: Union[int, None] = None
+    rework: Union[int, None] = None
 
+class ReportRequest(BaseModel):
+    # shift: Union[int, None] = Field(default_factory=get_curr_shift())
+    # date: Union[str, None] = Field(default_factory=get_curr_datetime().strftime('%m/%d/%Y'))
+    date: Union[date, None]
+    shift: Union[int, None]
