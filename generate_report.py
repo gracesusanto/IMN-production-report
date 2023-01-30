@@ -74,8 +74,7 @@ engine = database.get_engine()
 session = sa.orm.sessionmaker(autocommit=False, autoflush=False,
                                       bind=engine)()
 
-# col_order = ['MC', 'Operator', 'Part No', 'Part Name', 'Prs', 'Start', 'Stop', 'Desc', 'Qty']
-col_order = ['MC', 'Operator', 'Part No', 'Start', 'Stop', 'Desc', 'Qty', 'Reject', 'Rework']
+col_order = ['MC', 'Operator', 'Kode Tooling', 'Common Tooling Name', 'Start', 'Stop', 'Desc', 'Qty', 'Reject', 'Rework']
 
 def query_continued_downtime():
     continued_downtime_start = aliased(models.Stop)
@@ -90,7 +89,8 @@ def query_continued_downtime():
         with_entities(
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
-            models.Tooling.part_no.label("Part No"),
+            models.Tooling.kode_tooling.label("Kode Tooling"),
+            models.Tooling.common_tooling_name.label("Common Tooling Name"),
             # models.Tooling.part_name.label("Part Name"),
             # models.Tooling.proses.label("Prs"),
             continued_downtime_start.timestamp.label("Start"), 
@@ -121,7 +121,8 @@ def query_last_downtime():
         with_entities(
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
-            models.Tooling.part_no.label("Part No"),
+            models.Tooling.kode_tooling.label("Kode Tooling"),
+            models.Tooling.common_tooling_name.label("Common Tooling Name"),
             # models.Tooling.part_name.label("Part Name"),
             # models.Tooling.proses.label("Prs"),
             last_downtime_start.timestamp.label("Start"), 
@@ -152,7 +153,8 @@ def query_utility():
         with_entities(
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
-            models.Tooling.part_no.label("Part No"),
+            models.Tooling.kode_tooling.label("Kode Tooling"),
+            models.Tooling.common_tooling_name.label("Common Tooling Name"),
             # models.Tooling.part_name.label("Part Name"),
             # models.Tooling.proses.label("Prs"),
             utility_start.timestamp.label("Start"), 
@@ -167,7 +169,7 @@ def query_utility():
         sql = query,
         con = engine
     )
-    df['Desc'] = 'U: Utility'
+    df['Desc'] = 'U : Utility'
     return df[col_order]
 
 def get_mesin_report(date_time=None, shift=None):
@@ -201,7 +203,7 @@ def get_mesin_report(date_time=None, shift=None):
     df['Reject'] = df['Reject'].astype(int)
     df['Rework'] = df['Rework'].astype(int)
     df.drop(['Start', 'Stop'], axis=1, inplace=True)
-    header = ['MC', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'Part No', 'Operator', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
+    header = ['MC', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'Kode Tooling', 'Common Tooling Name', 'Operator', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
     df = df[header]
     print(df)
     df.to_csv(_get_csv_folder("mesin", date_time, shift))
@@ -221,7 +223,8 @@ def query_continued_downtime_operator():
         with_entities(
             models.Operator.name.label("Operator"),
             models.Mesin.name.label("MC"),
-            models.Tooling.part_no.label("Part No"),
+            models.Tooling.kode_tooling.label("Kode Tooling"),
+            models.Tooling.common_tooling_name.label("Common Tooling Name"),
             continued_downtime_start.timestamp.label("Start"), 
             continued_downtime_stop.timestamp.label("Stop"),
             models.ContinuedDowntimeOperator.downtime_category.label("Desc"),
@@ -250,7 +253,8 @@ def query_last_downtime_operator():
         with_entities(
             models.Operator.name.label("Operator"),
             models.Mesin.name.label("MC"),
-            models.Tooling.part_no.label("Part No"),
+            models.Tooling.kode_tooling.label("Kode Tooling"),
+            models.Tooling.common_tooling_name.label("Common Tooling Name"),
             last_downtime_start.timestamp.label("Start"), 
             last_downtime_stop.timestamp.label("Stop"),
             models.LastDowntimeOperator.downtime_category.label("Desc"),
@@ -279,7 +283,8 @@ def query_utility_operator():
         with_entities(
             models.Operator.name.label("Operator"),
             models.Mesin.name.label("MC"),
-            models.Tooling.part_no.label("Part No"),
+            models.Tooling.kode_tooling.label("Kode Tooling"),
+            models.Tooling.common_tooling_name.label("Common Tooling Name"),
             utility_start.timestamp.label("Start"), 
             utility_stop.timestamp.label("Stop"),
             models.UtilityOperator.output.label("Qty"),
@@ -292,7 +297,7 @@ def query_utility_operator():
         sql = query,
         con = engine
     )
-    df['Desc'] = 'U: Utility'
+    df['Desc'] = 'U : Utility'
     return df
 
 def get_operator_report(date_time=None, shift=None):
@@ -343,7 +348,7 @@ def get_operator_report(date_time=None, shift=None):
     df['Reject'] = df['Reject'].astype(int)
     df['Rework'] = df['Rework'].astype(int)
     df.drop(['Start', 'Stop'], axis=1, inplace=True)
-    header = ['Operator', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'MC', 'Part No', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
+    header = ['Operator', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'MC', 'Kode Tooling', 'Common Tooling Name', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
     df = df[header]
     print(df)
     df.to_csv(_get_csv_folder("operator", date_time, shift))
