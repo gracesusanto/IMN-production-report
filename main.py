@@ -42,6 +42,17 @@ def get_report(request: schema.ReportRequest):
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
 
+@app.post("/report/operator")
+def get_report(request: schema.ReportRequest):
+    date_time = request.date if request.date is not None else generate_report.get_curr_datetime()
+    shift = request.shift if request.shift is not None else generate_report.get_curr_shift()
+
+    df, filename = generate_report.get_operator_report(date_time, shift)
+    response = fastapi.responses.StreamingResponse(io.StringIO(df.to_csv(index=False)), media_type="text/csv")
+
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
+
 @app.get("/tooling/")
 def get_tooling(session=Sessioner):
     toolings = session.query(models.Tooling).all()
