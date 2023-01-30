@@ -349,5 +349,6 @@ def get_operator_report(date_time=None, shift=None):
     df.to_csv(_get_csv_folder("operator", date_time, shift))
     return df, _get_csv_filename("operator", date_time, shift)
 
-get_mesin_report(shift=3)
-get_operator_report()
+if __name__ == "__main__":
+    get_mesin_report()
+    get_operator_report()

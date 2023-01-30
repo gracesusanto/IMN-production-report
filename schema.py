@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 
 import models
-from generate_report import get_curr_datetime, get_curr_shift
 
 Mesin = sqlalchemy_to_pydantic(models.Mesin, exclude=['id', 'time_created', 'time_updated'])
 
@@ -33,7 +32,5 @@ class Activity(BaseModel):
     rework: Union[int, None] = None
 
 class ReportRequest(BaseModel):
-    # shift: Union[int, None] = Field(default_factory=get_curr_shift())
-    # date: Union[str, None] = Field(default_factory=get_curr_datetime().strftime('%m/%d/%Y'))
     date: Union[date, None]
-    shift: Union[int, None]
+    shift: Union[int, None] = 1
