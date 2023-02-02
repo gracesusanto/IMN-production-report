@@ -1,4 +1,5 @@
 import csv
+import os.path
 
 from sqlalchemy.orm import sessionmaker
 
@@ -13,7 +14,7 @@ def tooling_not_null(i, offset):
     return i[7 + offset] != ''
 
 def get_tooling_id(i, offset):
-    return f'TL-{i[7 + offset]}'.replace(" ", "-")
+    return f'TL-{i[7 + offset]}'.replace(" ", "-").replace("/", "-OF-")
 
 def extract_tooling(i, offset):
     tooling_id = get_tooling_id(i, offset)
@@ -64,8 +65,17 @@ def extract_operator(i, offset):
     return None
 
 def import_data(filename, model, get_id, extract_data, data_not_null, offset):
+    if not os.path.isfile(filename):
+        print(f"{filename} file not found")
+        return
+        
     with open(filename, newline='') as csvfile:
-        csvreader = list(csv.reader(csvfile, delimiter=','))
+        try:
+            dialect = csv.Sniffer().sniff(csvfile.readline(), delimiters=";,")
+            csvfile.seek(0)
+            csvreader = list(csv.reader(csvfile, dialect))
+        except:
+            csvreader = list(csv.reader(csvfile, delimiter=","))
         all_data_id = [ data.id for data in session.query(model).distinct() ]
         data_to_input = { get_id(i, offset) : extract_data(i, offset) for i in csvreader[1:] \
             if (data_not_null(i, offset) and get_id(i, offset) not in all_data_id) }
@@ -103,11 +113,18 @@ def import_operator(filename, offset=0):
 
 def import_to_db(filename):
     header = ['M/C','Tonase','Customer','Part No.','Part Name','Child Part Name','Kode Tooling','Common Tooling Name','Proses','STD Jam (Pcs)','Operator']
-    with open(filename, newline='') as csvfile:
-        csvreader = list(csv.reader(csvfile, delimiter=','))
-        if list(map(str.strip, csvreader[0])) != header:
-            print("Failed to read header")
-            return
+    if os.path.isfile(filename):
+        with open(filename, newline='') as csvfile:
+            try:
+                dialect = csv.Sniffer().sniff(csvfile.readline(), delimiters=";,")
+                csvfile.seek(0)
+                csvreader = list(csv.reader(csvfile, dialect))
+            except:
+                csvreader = list(csv.reader(csvfile, delimiter=","))
+
+            if list(map(str.strip, csvreader[0])) != header:
+                print("Failed to read header")
+                return
 
     # Import Tooling Data
     import_tooling(filename)
