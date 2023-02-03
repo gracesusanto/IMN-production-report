@@ -334,7 +334,7 @@ def get_operator_report(date_time=None, shift=None):
                 'Desc': 'NK : Not Known'
             }
             df = pandas.concat([df, pandas.DataFrame([insert_row])])
-    df.drop(df.loc[df['Desc']=="NP: No Plan"].index, inplace=True)
+    df.drop(df.loc[df['Desc']=="NP : No Plan"].index, inplace=True)
     df = df.sort_values(by=['Operator', 'Start']).reset_index(drop=True)
     
     df['StartTime'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
