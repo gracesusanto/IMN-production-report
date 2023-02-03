@@ -5,6 +5,21 @@ from fastapi import HTTPException
 
 import models
 
+def is_operator_running(operator_id, session):
+    operator_status = (
+        session.query(models.OperatorStatus)
+        .filter(models.OperatorStatus.id == operator_id)
+        .one_or_none()
+    )
+
+    if operator_status is None:
+        return False, models.DisplayedStatus.IDLE, "", ""
+
+    if operator_status.status == models.DisplayedStatus.IDLE:
+        return False, operator_status.status, "", ""
+    else:
+        return True, operator_status.status, operator_status.last_tooling_id, operator_status.last_mesin_id
+    
 
 def check_operator(tooling_id, mesin_id, operator_id, session):
     operator_status = (
@@ -16,7 +31,7 @@ def check_operator(tooling_id, mesin_id, operator_id, session):
     if operator_status is None :
         operator_status = models.OperatorStatus(
             id=operator_id, 
-            status=models.OperatorStatusEnum.RUNNING,
+            status=models.DisplayedStatus.RUNNING,
             last_tooling_id = tooling_id,
             last_mesin_id = mesin_id
         )
@@ -24,20 +39,43 @@ def check_operator(tooling_id, mesin_id, operator_id, session):
         session.commit()
         return True, ""
     
-    if operator_status.status == models.OperatorStatusEnum.IDLE:
+    if operator_status.status == models.DisplayedStatus.IDLE:
         return True, ""
     else:
         if (operator_status.last_tooling_id == tooling_id 
         and operator_status.last_mesin_id == mesin_id):
                 return True, ""
     
-    error_message = f"ERROR \nOperator {operator_id} sedang running di \n" +\
+    message = f"ERROR \nOperator {operator_id} sedang running di \n" +\
         f"Mesin:\t {operator_status.last_mesin_id} \n" +\
         f"Tooling:\t {operator_status.last_tooling_id}\n\n" + \
         f"Silahkan stop operasi di Mesin {operator_status.last_mesin_id} dan Tooling {operator_status.last_tooling_id} dengan kategori NP : No Planning, \n" + \
-        "atau ganti operator di mesin tersebut."
+        "atau ganti operator di mesin tersebut.\n\n"
     
-    return False, error_message
+    return False, message
+
+def check_mesin(mesin_id, operator_id, session):
+    mesin_status = (
+        session.query(models.MesinStatus)
+        .filter(models.MesinStatus.id == mesin_id)
+        .one_or_none()
+    )
+
+    if mesin_status is None :
+        return True, ""
+    
+    if mesin_status.displayed_status == models.DisplayedStatus.IDLE:
+        return True, ""
+    
+    if (mesin_status.last_operator_id == operator_id):
+        return True, ""
+    
+    message = f"ERROR \nMesin {mesin_id} sedang running dengan detail \n" +\
+        f"Operator:\t {mesin_status.last_operator_id} \n" +\
+        f"Tooling:\t {mesin_status.last_tooling_id}.\n\n" +\
+            "Silahkan stop mesin terlebih dahulu."
+    
+    return False, message
 
 def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     # Insert to Start Table
@@ -108,12 +146,21 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     session.commit()
 
     if (mesin_status.last_operator_id != operator_id):
-        operator_status = (
+        operator_status_old = (
             session.query(models.OperatorStatus)
             .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
             .one_or_none()
         )
-        operator_status.status = models.OperatorStatusEnum.IDLE
+        operator_status_old.status = models.DisplayedStatus.IDLE
+
+    operator_status_new = (
+        session.query(models.OperatorStatus)
+        .filter(models.OperatorStatus.id == operator_id)
+        .one_or_none()
+    )
+    operator_status_new.last_tooling_id = tooling_id
+    operator_status_new.last_mesin_id = mesin_id
+    operator_status_new.status = models.DisplayedStatus.RUNNING
 
     # Update mesin's status and last start
     mesin_status.status = models.Status.RUNNING
@@ -121,7 +168,7 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     mesin_status.last_tooling_id = tooling_id
     mesin_status.last_operator_id = operator_id
     mesin_status.category_downtime = "U : Utility"
-    mesin_status.displayedStatus = models.DisplayedStatus.RUNNING
+    mesin_status.displayed_status = models.DisplayedStatus.RUNNING
     session.commit()
 
 
@@ -196,13 +243,22 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
     displayed_status =  get_displayed_status(downtime_category)
 
     if (mesin_status.last_operator_id != operator_id) or \
-    (displayed_status == models.DisplayedStatus.IDLE):
-        operator_status = (
+    (mesin_status.last_operator_id == operator_id and displayed_status == models.DisplayedStatus.IDLE):
+        operator_status_old = (
             session.query(models.OperatorStatus)
             .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
             .one_or_none()
         )
-        operator_status.status = models.OperatorStatusEnum.IDLE
+        operator_status_old.status = models.DisplayedStatus.IDLE
+
+    operator_status_new = (
+        session.query(models.OperatorStatus)
+        .filter(models.OperatorStatus.id == operator_id)
+        .one_or_none()
+    )
+    operator_status_new.last_tooling_id = tooling_id
+    operator_status_new.last_mesin_id = mesin_id
+    operator_status_new.status = displayed_status
 
     # Update mesin's status and last stop
     mesin_status.status = update_downtime_mesin_status(downtime_category)
@@ -211,10 +267,8 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
     mesin_status.last_operator_id = operator_id
     mesin_status.category_downtime = downtime_category
 
-    mesin_status.displayedStatus = displayed_status
+    mesin_status.displayed_status = displayed_status
 
-    if displayed_status == models.DisplayedStatus.IDLE:
-        mesin_status.last_operator_id = None
 
 
     session.commit()
@@ -289,13 +343,22 @@ def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category,
     displayed_status =  get_displayed_status(downtime_category)
 
     if (mesin_status.last_operator_id != operator_id) or \
-    (displayed_status == models.DisplayedStatus.IDLE):
-        operator_status = (
+    (mesin_status.last_operator_id == operator_id and displayed_status == models.DisplayedStatus.IDLE):
+        operator_status_old = (
             session.query(models.OperatorStatus)
             .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
             .one_or_none()
         )
-        operator_status.status = models.OperatorStatusEnum.IDLE
+        operator_status_old.status = models.DisplayedStatus.IDLE
+
+    operator_status_new = (
+        session.query(models.OperatorStatus)
+        .filter(models.OperatorStatus.id == operator_id)
+        .one_or_none()
+    )
+    operator_status_new.last_tooling_id = tooling_id
+    operator_status_new.last_mesin_id = mesin_id
+    operator_status_new.status = displayed_status
 
     # Update mesin's status and last stop
     mesin_status.status = update_downtime_mesin_status(downtime_category)
@@ -304,10 +367,8 @@ def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category,
     mesin_status.last_operator_id = operator_id
     mesin_status.category_downtime = downtime_category
 
-    mesin_status.displayedStatus = displayed_status
+    mesin_status.displayed_status = displayed_status
 
-    if displayed_status == models.DisplayedStatus.IDLE:
-        mesin_status.last_operator_id = None
 
     session.commit()
 

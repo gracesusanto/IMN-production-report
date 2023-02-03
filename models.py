@@ -135,7 +135,7 @@ class MesinStatus(Base):
     last_tooling = sa.orm.relationship("Tooling", backref="curr_mesin", uselist=False)
     last_operator = sa.orm.relationship("Operator", backref="curr_mesin", uselist=False)
     category_downtime = sa.Column(sa.String, nullable=True)
-    displayedStatus = sa.Column(sa.Enum(DisplayedStatus, name="displayed_status"), default=DisplayedStatus.IDLE, nullable=True)
+    displayed_status = sa.Column(sa.Enum(DisplayedStatus, name="displayed_status"), default=DisplayedStatus.IDLE, nullable=True)
 
 class UtilityOperator(Base):
     __tablename__ = "utility_operator"
@@ -182,7 +182,7 @@ class OperatorStatusEnum(Enum):
 class OperatorStatus(Base):
     __tablename__ = "operator_status"
     id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False, primary_key=True, index=True)
-    status = sa.Column(sa.Enum(OperatorStatusEnum, name="operator_status_enum"), default=OperatorStatusEnum.IDLE, nullable=False)
+    status = sa.Column(sa.Enum(DisplayedStatus, name="operator_status_enum"), default=DisplayedStatus.IDLE, nullable=False)
     last_tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=False)
     last_mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
     last_tooling = sa.orm.relationship("Tooling", backref="curr_operator", uselist=False)

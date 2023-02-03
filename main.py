@@ -100,21 +100,41 @@ def get_continued_downtime_operator(session=Sessioner):
 
 @app.get("/mesin-status-all/")
 def get_mesin_status(session=Sessioner):
+    mesin_status_idle = session.query(models.MesinStatus).\
+        filter(models.MesinStatus.displayed_status == models.DisplayedStatus.IDLE).\
+        with_entities(
+            models.MesinStatus.id.label("Mesin"),
+            models.MesinStatus.last_tooling_id.label("Tooling"),
+            models.MesinStatus.displayed_status.label("Status"),
+            models.MesinStatus.category_downtime.label("Categori Downtime")
+        ).order_by(models.MesinStatus.id.asc()).\
+        all()
     mesin_status = session.query(models.MesinStatus).\
+        filter(models.MesinStatus.displayed_status != models.DisplayedStatus.IDLE).\
         with_entities(
             models.MesinStatus.id.label("Mesin"),
             models.MesinStatus.last_tooling_id.label("Tooling"),
             models.MesinStatus.last_operator_id.label("Operator"),
-            models.MesinStatus.displayedStatus.label("Status"),
+            models.MesinStatus.displayed_status.label("Status"),
             models.MesinStatus.category_downtime.label("Categori Downtime")
         ).order_by(models.MesinStatus.id.asc()).\
         all()
-    return {"details": mesin_status}
+    return { "details": mesin_status + mesin_status_idle }
 
 @app.get("/operator-status-all/")
-def get_operator_status(session=Sessioner):
+def get_operator_status_all(session=Sessioner):
     operator_status = session.query(models.OperatorStatus).all()
     return operator_status
+
+@app.get("/operator/status/{operator_id}")
+def get_operator_status(operator_id: str, session=Sessioner):
+    is_running, operator_status, tooling_id, mesin_id = business_logic.is_operator_running(operator_id, session)
+    return {
+        "isRunning": is_running,
+        "operatorStatus": operator_status,
+        "toolingId": tooling_id,
+        "mesinId": mesin_id
+    }
 
 @app.get("/start/")
 def get_start(session=Sessioner):
@@ -149,13 +169,25 @@ def get_operator(operator_id: str, session=Sessioner):
 
 @app.post("/operator-status")
 def check_operator_status(request: schema.CheckOperatorStatus, session=Sessioner):
-    operator_status_ok, error_msg = business_logic.check_operator(tooling_id=request.tooling_id, 
-        mesin_id=request.mesin_id, 
-        operator_id=request.operator_id,
-        session=session)
+    mesin_status_ok, mesin_error_msg = business_logic.check_mesin(
+        mesin_id=request.mesin_id,
+        operator_id=request.operator_id, 
+        session=session
+    )
+
+    operator_status_ok = False
+    operator_error_msg = ""
+    if mesin_status_ok:
+        operator_status_ok, operator_error_msg = business_logic.check_operator(
+            tooling_id=request.tooling_id, 
+            mesin_id=request.mesin_id, 
+            operator_id=request.operator_id,
+            session=session
+        )
+    
     return {
-        "isSuccess": operator_status_ok,
-        "errorMessage": error_msg
+        "isSuccess": operator_status_ok and mesin_status_ok,
+        "errorMessage": operator_error_msg + mesin_error_msg
     }
 
 @app.post("/activity")
@@ -165,10 +197,6 @@ def post_activity(activity: schema.Activity, session=Sessioner):
         session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first() is None:
         raise fastapi.HTTPException(404, "Invalid input")
     
-    operator_status_ok, error_msg = business_logic.check_operator(tooling_id=activity.tooling_id, 
-                mesin_id=activity.mesin_id, 
-                operator_id=activity.operator_id,
-                session=session)
     match activity.type:
         case schema.ActivityType.START:
             business_logic.start_activity(

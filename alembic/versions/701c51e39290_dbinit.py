@@ -1,8 +1,8 @@
 """dbinit
 
-Revision ID: cfdc84a0a3a1
+Revision ID: 701c51e39290
 Revises: 
-Create Date: 2023-02-03 04:10:09.601670
+Create Date: 2023-02-03 07:51:16.855397
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'cfdc84a0a3a1'
+revision = '701c51e39290'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -52,7 +52,7 @@ def upgrade():
     op.create_index(op.f('ix_tooling_id'), 'tooling', ['id'], unique=False)
     op.create_table('operator_status',
     sa.Column('id', sa.String(), nullable=False),
-    sa.Column('status', sa.Enum('RUNNING', 'IDLE', name='operator_status_enum'), nullable=False),
+    sa.Column('status', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='operator_status_enum'), nullable=False),
     sa.Column('last_tooling_id', sa.String(), nullable=False),
     sa.Column('last_mesin_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['id'], ['operator.id'], ),
@@ -145,7 +145,7 @@ def upgrade():
     sa.Column('last_tooling_id', sa.String(), nullable=False),
     sa.Column('last_operator_id', sa.String(), nullable=True),
     sa.Column('category_downtime', sa.String(), nullable=True),
-    sa.Column('displayedStatus', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='displayed_status'), nullable=True),
+    sa.Column('displayed_status', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='displayed_status'), nullable=True),
     sa.ForeignKeyConstraint(['id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['last_operator_id'], ['operator.id'], ),
     sa.ForeignKeyConstraint(['last_start_id'], ['start.id'], ),
