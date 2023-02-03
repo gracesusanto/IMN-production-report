@@ -114,6 +114,14 @@ class Status(Enum):
     IDLE = "IDLE"
     SETUP = "SETUP"
 
+@strawberry.enum
+class DisplayedStatus(Enum):
+    """ Status to be displayed in Running Mesin All"""
+
+    RUNNING = "RUNNING"
+    IDLE = "IDLE"
+    DOWNTIME = "DOWNTIME"
+
 class MesinStatus(Base):
     __tablename__ = "mesin_status"
     id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False, primary_key=True, index=True)
@@ -121,11 +129,13 @@ class MesinStatus(Base):
     last_start_id = sa.Column(sa.Integer, sa.ForeignKey("start.id"), nullable=False)
     last_stop_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
     last_tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=False)
-    last_operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False)
+    last_operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=True)
     last_start = sa.orm.relationship("Start", backref="mesin_status", uselist=False)
     last_stop = sa.orm.relationship("Stop", backref="mesin_status", uselist=False)
     last_tooling = sa.orm.relationship("Tooling", backref="curr_mesin", uselist=False)
     last_operator = sa.orm.relationship("Operator", backref="curr_mesin", uselist=False)
+    category_downtime = sa.Column(sa.String, nullable=True)
+    displayedStatus = sa.Column(sa.Enum(DisplayedStatus, name="displayed_status"), default=DisplayedStatus.IDLE, nullable=True)
 
 class UtilityOperator(Base):
     __tablename__ = "utility_operator"
@@ -162,3 +172,18 @@ class ContinuedDowntimeOperator(Base):
     reject = sa.Column(sa.Integer, nullable=True)
     rework = sa.Column(sa.Integer, nullable=True)
     downtime_category = sa.Column(sa.String)
+
+@strawberry.enum
+class OperatorStatusEnum(Enum):
+    """Operator Status Type"""
+
+    RUNNING = "RUNNING"
+    IDLE = "IDLE"
+class OperatorStatus(Base):
+    __tablename__ = "operator_status"
+    id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False, primary_key=True, index=True)
+    status = sa.Column(sa.Enum(OperatorStatusEnum, name="operator_status_enum"), default=OperatorStatusEnum.IDLE, nullable=False)
+    last_tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=False)
+    last_mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
+    last_tooling = sa.orm.relationship("Tooling", backref="curr_operator", uselist=False)
+    last_mesin = sa.orm.relationship("Mesin", backref="curr_operator", uselist=False)

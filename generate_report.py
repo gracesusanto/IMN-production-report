@@ -313,8 +313,6 @@ def get_operator_report(date_time=None, shift=None):
         ], axis=0).sort_values(by=['Operator', 'Start']).reset_index(drop=True)
 
     df['Tanggal'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y')
-    df['StartTime'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
-    df['StopTime'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
 
     df['Start'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
     df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
@@ -328,7 +326,7 @@ def get_operator_report(date_time=None, shift=None):
             continue
         if ((df.loc[index]['Operator'] == df.loc[index-1]['Operator']) and 
         (df.loc[index]['Start'] != df.loc[index-1]['Stop']) and 
-        df.loc[index]['Desc'][:2] != "NP"):
+        (df.loc[index]['Desc'][:2] != "NP" and df.loc[index]['Desc'][:2] != "BT")):
             insert_row = {
                 'Operator': df.loc[index]['Operator'], 
                 'Start': df.loc[index-1]['Stop'], 
@@ -338,6 +336,9 @@ def get_operator_report(date_time=None, shift=None):
             df = pandas.concat([df, pandas.DataFrame([insert_row])])
     df.drop(df.loc[df['Desc']=="NP: No Plan"].index, inplace=True)
     df = df.sort_values(by=['Operator', 'Start']).reset_index(drop=True)
+    
+    df['StartTime'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
+    df['StopTime'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%H:%M:%S')
 
     df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
     df['Duration'] = df['Duration'].dt.total_seconds()

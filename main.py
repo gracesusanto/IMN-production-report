@@ -68,40 +68,53 @@ def get_operator(session=Sessioner):
     operators = session.query(models.Operator).all()
     return operators
 
-@app.get("/utility_mesin/")
+@app.get("/utility-mesin/")
 def get_utility_mesin(session=Sessioner):
     utility_mesin = session.query(models.UtilityMesin).all()
     return utility_mesin
 
-@app.get("/last_downtime_mesin/")
+@app.get("/last-downtime-mesin/")
 def get_last_downtime_mesin(session=Sessioner):
     last_downtime_mesin = session.query(models.LastDowntimeMesin).all()
     return last_downtime_mesin
 
-@app.get("/continued_downtime_mesin/")
+@app.get("/continued-downtime-mesin/")
 def get_continued_downtime_mesin(session=Sessioner):
     continued_downtime_mesin = session.query(models.ContinuedDowntimeMesin).all()
     return continued_downtime_mesin
 
-@app.get("/utility_operator/")
+@app.get("/utility-operator/")
 def get_utility_operator(session=Sessioner):
     utility_operator = session.query(models.UtilityOperator).all()
     return utility_operator
 
-@app.get("/last_downtime_operator/")
+@app.get("/last-downtime-operator/")
 def get_last_downtime_operator(session=Sessioner):
     last_downtime_operator = session.query(models.LastDowntimeOperator).all()
     return last_downtime_operator
 
-@app.get("/continued_downtime_operator/")
+@app.get("/continued-downtime-operator/")
 def get_continued_downtime_operator(session=Sessioner):
     continued_downtime_operator = session.query(models.ContinuedDowntimeOperator).all()
     return continued_downtime_operator
 
-@app.get("/mesin_status/")
+@app.get("/mesin-status-all/")
 def get_mesin_status(session=Sessioner):
-    mesin_status = session.query(models.MesinStatus).all()
-    return mesin_status
+    mesin_status = session.query(models.MesinStatus).\
+        with_entities(
+            models.MesinStatus.id.label("Mesin"),
+            models.MesinStatus.last_tooling_id.label("Tooling"),
+            models.MesinStatus.last_operator_id.label("Operator"),
+            models.MesinStatus.displayedStatus.label("Status"),
+            models.MesinStatus.category_downtime.label("Categori Downtime")
+        ).order_by(models.MesinStatus.id.asc()).\
+        all()
+    return {"details": mesin_status}
+
+@app.get("/operator-status-all/")
+def get_operator_status(session=Sessioner):
+    operator_status = session.query(models.OperatorStatus).all()
+    return operator_status
 
 @app.get("/start/")
 def get_start(session=Sessioner):
@@ -134,13 +147,28 @@ def get_operator(operator_id: str, session=Sessioner):
         raise fastapi.HTTPException(404, f"No Operator with id {operator_id} found.")
     return operator
 
+@app.post("/operator-status")
+def check_operator_status(request: schema.CheckOperatorStatus, session=Sessioner):
+    operator_status_ok, error_msg = business_logic.check_operator(tooling_id=request.tooling_id, 
+        mesin_id=request.mesin_id, 
+        operator_id=request.operator_id,
+        session=session)
+    return {
+        "isSuccess": operator_status_ok,
+        "errorMessage": error_msg
+    }
+
 @app.post("/activity")
 def post_activity(activity: schema.Activity, session=Sessioner):
     if session.query(models.Mesin).filter(models.Mesin.id == activity.mesin_id).first() is None or \
         session.query(models.Tooling).filter(models.Tooling.id == activity.tooling_id).first() is None or \
         session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first() is None:
         raise fastapi.HTTPException(404, "Invalid input")
-
+    
+    operator_status_ok, error_msg = business_logic.check_operator(tooling_id=activity.tooling_id, 
+                mesin_id=activity.mesin_id, 
+                operator_id=activity.operator_id,
+                session=session)
     match activity.type:
         case schema.ActivityType.START:
             business_logic.start_activity(
@@ -180,7 +208,7 @@ def post_activity(activity: schema.Activity, session=Sessioner):
 
 @app.get("/mesin/status/{mesin_id}")
 def get_mesin_status(mesin_id: str, session=Sessioner):
-    status = False
+    status = models.Status.IDLE
     mesin_status = session.query(models.MesinStatus).filter(models.MesinStatus.id == mesin_id).one_or_none()
     if mesin_status is not None:
         status = mesin_status.status

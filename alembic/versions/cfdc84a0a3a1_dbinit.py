@@ -1,8 +1,8 @@
-"""New DB
+"""dbinit
 
-Revision ID: 1f80954185d3
+Revision ID: cfdc84a0a3a1
 Revises: 
-Create Date: 2023-01-26 09:22:29.952823
+Create Date: 2023-02-03 04:10:09.601670
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '1f80954185d3'
+revision = 'cfdc84a0a3a1'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -50,6 +50,17 @@ def upgrade():
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_tooling_id'), 'tooling', ['id'], unique=False)
+    op.create_table('operator_status',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('status', sa.Enum('RUNNING', 'IDLE', name='operator_status_enum'), nullable=False),
+    sa.Column('last_tooling_id', sa.String(), nullable=False),
+    sa.Column('last_mesin_id', sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(['id'], ['operator.id'], ),
+    sa.ForeignKeyConstraint(['last_mesin_id'], ['mesin.id'], ),
+    sa.ForeignKeyConstraint(['last_tooling_id'], ['tooling.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_operator_status_id'), 'operator_status', ['id'], unique=False)
     op.create_table('start',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('tooling_id', sa.String(), nullable=True),
@@ -132,7 +143,9 @@ def upgrade():
     sa.Column('last_start_id', sa.Integer(), nullable=False),
     sa.Column('last_stop_id', sa.Integer(), nullable=False),
     sa.Column('last_tooling_id', sa.String(), nullable=False),
-    sa.Column('last_operator_id', sa.String(), nullable=False),
+    sa.Column('last_operator_id', sa.String(), nullable=True),
+    sa.Column('category_downtime', sa.String(), nullable=True),
+    sa.Column('displayedStatus', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='displayed_status'), nullable=True),
     sa.ForeignKeyConstraint(['id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['last_operator_id'], ['operator.id'], ),
     sa.ForeignKeyConstraint(['last_start_id'], ['start.id'], ),
@@ -182,10 +195,21 @@ def downgrade():
     op.drop_table('continued_downtime_mesin')
     op.drop_table('stop')
     op.drop_table('start')
+    op.drop_index(op.f('ix_operator_status_id'), table_name='operator_status')
+    op.drop_table('operator_status')
     op.drop_index(op.f('ix_tooling_id'), table_name='tooling')
     op.drop_table('tooling')
     op.drop_index(op.f('ix_operator_id'), table_name='operator')
     op.drop_table('operator')
     op.drop_index(op.f('ix_mesin_id'), table_name='mesin')
     op.drop_table('mesin')
+
+    sa_enum_operator_status = sa.Enum(name="operator_status_enum")
+    sa_enum_operator_status.drop(op.get_bind(), checkfirst=True)
+
+    sa_enum_status = sa.Enum(name="status")
+    sa_enum_status.drop(op.get_bind(), checkfirst=True)
+
+    sa_enum_displayed_status = sa.Enum(name="displayed_status")
+    sa_enum_displayed_status.drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###

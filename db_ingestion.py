@@ -14,7 +14,7 @@ def tooling_not_null(i, offset):
     return i[7 + offset] != ''
 
 def get_tooling_id(i, offset):
-    return f'TL-{i[7 + offset]}'.replace(" ", "-").replace("/", "-OF-")
+    return f'TL-{i[7 + offset]}-{i[6 + offset]}'.replace(" ", "-").replace("/", "-OF-")
 
 def extract_tooling(i, offset):
     tooling_id = get_tooling_id(i, offset)

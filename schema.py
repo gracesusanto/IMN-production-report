@@ -15,7 +15,6 @@ Operator = sqlalchemy_to_pydantic(models.Operator, exclude=['id', 'time_created'
 
 Start = sqlalchemy_to_pydantic(models.Start)
 
-
 class ActivityType(str, Enum):
     START = "start"
     FIRST_STOP = "first_stop"
@@ -34,3 +33,8 @@ class Activity(BaseModel):
 class ReportRequest(BaseModel):
     date: Union[date, None]
     shift: Union[int, None] = 1
+
+class CheckOperatorStatus(BaseModel):
+    tooling_id: str
+    mesin_id: str
+    operator_id: str
