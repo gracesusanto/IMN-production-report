@@ -1,4 +1,5 @@
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
+import json
 
 import pandas
 import sqlalchemy as sa
@@ -8,14 +9,20 @@ import pytz
 import database
 import models
 
+"""
+All timezone-aware dates and times are stored internally in UTC. 
+They are converted to local time in the zone specified by 
+the timezone configuration parameter before being displayed to the client.
+"""
+_TIMEZONE = pytz.timezone('Asia/Jakarta')
 
 def _is_time_between(begin_time, end_time, check_time=None):
-    # If check time is not given, default to current UTC time
-    check_time = check_time or datetime.utcnow().time()
+    # If check time is not given, default to current timezone time
+    check_time = check_time or datetime.now(_TIMEZONE)
     if begin_time < end_time:
-        return check_time >= begin_time and check_time <= end_time
+        return check_time >= begin_time and check_time < end_time
     else: # crosses midnight
-        return check_time >= begin_time or check_time <= end_time
+        return check_time >= begin_time or check_time < end_time
 
 def _calculate_shift(row):
     date_time = datetime.strptime(row, '%m/%d/%Y %H:%M:%S')
@@ -23,38 +30,35 @@ def _calculate_shift(row):
 
 def _calculate_shift_from_datetime(date_time):
     comp_time = date_time.time()
-    
     if date_time.isoweekday() == 7: # Sunday
         return 3
-    elif date_time.isoweekday() == 6: # Saturday
-        if _is_time_between(time(7,00), time(12,00), comp_time):
-            return 1
-        elif _is_time_between(time(12,1), time(17,00), comp_time):
-            return 2
-        elif _is_time_between(time(17,1), time(23,00), comp_time):
-            return 3
-    elif date_time.isoweekday() < 6: # Weekday
-        if _is_time_between(time(7,00), time(15,00), comp_time):
-            return 1
-        elif _is_time_between(time(15,1), time(23,00), comp_time):
-            return 2
-        elif _is_time_between(time(23,1), time(7,00), comp_time):
-            return 3
+    else:
+        with open('working_shift.json', 'r') as openfile:
+            working_shift = json.load(openfile)
+
+            day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
+            for shift, timestamp in working_shift[day_of_week].items():
+                if _is_time_between(time(timestamp['from'],00), time(timestamp['to'],00), comp_time):
+                    return shift
+
+    return 0
 
 def get_curr_datetime():
-    return datetime.now(pytz.timezone('Asia/Jakarta')).date()
+    return datetime.now(_TIMEZONE).date()
 def get_curr_shift():
-    return _calculate_shift_from_datetime(datetime.now())
+    return _calculate_shift_from_datetime(datetime.now(_TIMEZONE))
 
-def _get_csv_filename(type, date_time=None, shift=None):
-    if date_time == None:
-        date_time = get_curr_datetime()
-    if shift == None:
-        shift = get_curr_shift()
-    return f"result_{type}_{date_time}_shift_{shift}.csv"
+def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
+    if date_from == date_to:
+        if shift_from == shift_to:
+            return f"result_{type}_{date_from}_shift_{shift_from}.csv"
+        else:
+            return f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}.csv"
+    else:
+            return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}.csv"
 
-def _get_csv_folder(type, date_time=None, shift=None):
-    filename = _get_csv_filename(type, date_time, shift)
+def _get_csv_folder(type, date_from, shift_from, date_to, shift_to):
+    filename = _get_csv_filename(type, date_from, shift_from, date_to, shift_to)
     return f"report/{type}/{filename}"
 
 def _convert_seconds(seconds):
@@ -68,7 +72,55 @@ def _convert_seconds(seconds):
     else:
         return f'{s:d}sec'
 
+def _calculate_datetime_from_shift(date_time, shift):
+    year = date_time.year
+    month = date_time.month
+    day = date_time.day
 
+    hour_from = 0
+    hour_to = 0
+
+    if date_time.isoweekday() != 7: # Not Sunday
+        with open('working_shift.json', 'r') as openfile:
+            working_shift = json.load(openfile)
+
+            day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
+            hour_from = working_shift[day_of_week][shift]['from']
+            hour_to = working_shift[day_of_week][shift]['to']
+
+            # Get time in UTC (from GMT +7)
+            time_from = datetime(year, month, day, hour_from, 0) + timedelta(hours=7)
+            time_to = datetime(year, month, day, hour_to, 0) + timedelta(hours=7)
+
+            return time_from, time_to
+
+            return time_from_utc, time_to_utc
+    
+    return datetime(year, month, day, 0, 0), datetime(year, month, day, 0, 0)
+
+def _calculate_datetime_range(date_from=None, shift_from: str="1", date_to=None, shift_to: str="3"):
+    # Fill None dates with today's date
+    if date_from is None and date_to is None:
+        date_from = date_to = datetime.today(_TIMEZONE)
+    elif date_from is None:
+        date_from = date_to
+    elif date_to is None:
+        date_to = date_from
+    
+    shift_from = str(shift_from)
+    shift_to = str(shift_to)
+
+    # Make sure from < to
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+    elif date_to == date_from:
+        if shift_to < shift_from:
+            shift_to, shift_from = shift_from, shift_to
+
+    time_from, _ = _calculate_datetime_from_shift(date_from, shift_from)
+    _, time_to = _calculate_datetime_from_shift(date_to, shift_to)
+
+    return time_from, time_to
 
 engine = database.get_engine()
 session = sa.orm.sessionmaker(autocommit=False, autoflush=False,
@@ -76,7 +128,7 @@ session = sa.orm.sessionmaker(autocommit=False, autoflush=False,
 
 col_order = ['MC', 'Operator', 'Kode Tooling', 'Common Tooling Name', 'Start', 'Stop', 'Desc', 'Qty', 'Reject', 'Rework']
 
-def query_continued_downtime():
+def query_continued_downtime(time_from, time_to):
     continued_downtime_start = aliased(models.Stop)
     continued_downtime_stop = aliased(models.Stop)
 
@@ -91,14 +143,14 @@ def query_continued_downtime():
             models.Operator.name.label("Operator"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
-            # models.Tooling.part_name.label("Part Name"),
-            # models.Tooling.proses.label("Prs"),
             continued_downtime_start.timestamp.label("Start"), 
             continued_downtime_stop.timestamp.label("Stop"),
             models.ContinuedDowntimeMesin.downtime_category.label("Desc"),
             models.ContinuedDowntimeMesin.reject.label("Reject"),
             models.ContinuedDowntimeMesin.rework.label("Rework"),
         ).\
+        filter(continued_downtime_start.timestamp >= time_from).\
+        filter(continued_downtime_start.timestamp < time_to).\
         statement
 
     df = pandas.read_sql(
@@ -108,7 +160,7 @@ def query_continued_downtime():
     df['Qty'] = 0
     return df[col_order]
 
-def query_last_downtime():
+def query_last_downtime(time_from, time_to):
     last_downtime_start = aliased(models.Stop)
     last_downtime_stop = aliased(models.Start)
 
@@ -123,14 +175,14 @@ def query_last_downtime():
             models.Operator.name.label("Operator"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
-            # models.Tooling.part_name.label("Part Name"),
-            # models.Tooling.proses.label("Prs"),
             last_downtime_start.timestamp.label("Start"), 
             last_downtime_stop.timestamp.label("Stop"),
             models.LastDowntimeMesin.downtime_category.label("Desc"),
             models.LastDowntimeMesin.reject.label("Reject"),
             models.LastDowntimeMesin.rework.label("Rework"),
         ).\
+        filter(last_downtime_start.timestamp >= time_from).\
+        filter(last_downtime_start.timestamp < time_to).\
         statement
 
     df = pandas.read_sql(
@@ -140,7 +192,7 @@ def query_last_downtime():
     df['Qty'] = 0
     return df[col_order]
 
-def query_utility():
+def query_utility(time_from, time_to):
     utility_start = aliased(models.Start)
     utility_stop = aliased(models.Stop)
 
@@ -155,14 +207,14 @@ def query_utility():
             models.Operator.name.label("Operator"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
-            # models.Tooling.part_name.label("Part Name"),
-            # models.Tooling.proses.label("Prs"),
             utility_start.timestamp.label("Start"), 
             utility_stop.timestamp.label("Stop"),
             models.UtilityMesin.output.label("Qty"),
             models.UtilityMesin.reject.label("Reject"),
             models.UtilityMesin.rework.label("Rework"),
         ).\
+        filter(utility_start.timestamp >= time_from).\
+        filter(utility_start.timestamp < time_to).\
         statement
 
     df = pandas.read_sql(
@@ -172,16 +224,18 @@ def query_utility():
     df['Desc'] = 'U : Utility'
     return df[col_order]
 
-def get_mesin_report(date_time=None, shift=None):
-    if date_time == None:
-        date_time = get_curr_datetime()
-    if shift == None:
-        shift = get_curr_shift()
+def get_mesin_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
+    time_from, time_to = _calculate_datetime_range(
+        date_from=date_time_from,
+        shift_from=shift_from,
+        date_to=date_time_to,
+        shift_to=shift_to,
+    )
 
     df = pandas.concat([
-        query_utility(), 
-        query_continued_downtime(), 
-        query_last_downtime()
+        query_utility(time_from, time_to), 
+        query_continued_downtime(time_from, time_to), 
+        query_last_downtime(time_from, time_to)
         ], axis=0).sort_values(by=['MC', 'Start']).reset_index(drop=True)
 
     df['Tanggal'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y')
@@ -192,25 +246,35 @@ def get_mesin_report(date_time=None, shift=None):
     df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
     df['Shift'] = df['Start'].apply(lambda x: _calculate_shift(x))
 
-    df = df.loc[df['Tanggal'] == date_time.strftime('%m/%d/%Y')]
-    df = df.loc[df['Shift'] == shift]
-    
     df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
     df['Duration'] = df['Duration'].dt.total_seconds()
     df['Duration'] = df['Duration'].apply(lambda x: _convert_seconds(x))
+
     df = df.fillna(0)
     df['Qty'] = df['Qty'].astype(int)
     df['Reject'] = df['Reject'].astype(int)
     df['Rework'] = df['Rework'].astype(int)
+
     df.drop(['Start', 'Stop'], axis=1, inplace=True)
     header = ['MC', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'Kode Tooling', 'Common Tooling Name', 'Operator', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
     df = df[header]
     print(df)
-    df.to_csv(_get_csv_folder("mesin", date_time, shift))
-    return df, _get_csv_filename("mesin", date_time, shift)
+    
+    df.to_csv(_get_csv_folder("mesin", 
+        date_from=date_time_from,
+        shift_from=shift_from,
+        date_to=date_time_to,
+        shift_to=shift_to,
+    ))
+    return df, _get_csv_filename("mesin", 
+        date_from=date_time_from,
+        shift_from=shift_from,
+        date_to=date_time_to,
+        shift_to=shift_to,
+    )
 
 
-def query_continued_downtime_operator():
+def query_continued_downtime_operator(time_from, time_to):
     continued_downtime_start = aliased(models.Stop)
     continued_downtime_stop = aliased(models.Stop)
 
@@ -231,6 +295,8 @@ def query_continued_downtime_operator():
             models.ContinuedDowntimeOperator.reject.label("Reject"),
             models.ContinuedDowntimeOperator.rework.label("Rework"),
         ).\
+        filter(continued_downtime_start.timestamp >= time_from).\
+        filter(continued_downtime_start.timestamp < time_to).\
         statement
 
     df = pandas.read_sql(
@@ -240,7 +306,7 @@ def query_continued_downtime_operator():
     df['Qty'] = 0
     return df
 
-def query_last_downtime_operator():
+def query_last_downtime_operator(time_from, time_to):
     last_downtime_start = aliased(models.Stop)
     last_downtime_stop = aliased(models.Start)
 
@@ -261,6 +327,8 @@ def query_last_downtime_operator():
             models.LastDowntimeOperator.reject.label("Reject"),
             models.LastDowntimeOperator.rework.label("Rework"),
         ).\
+        filter(last_downtime_start.timestamp >= time_from).\
+        filter(last_downtime_start.timestamp < time_to).\
         statement
 
     df = pandas.read_sql(
@@ -270,7 +338,7 @@ def query_last_downtime_operator():
     df['Qty'] = 0
     return df
 
-def query_utility_operator():
+def query_utility_operator(time_from, time_to):
     utility_start = aliased(models.Start)
     utility_stop = aliased(models.Stop)
 
@@ -291,6 +359,8 @@ def query_utility_operator():
             models.UtilityOperator.reject.label("Reject"),
             models.UtilityOperator.rework.label("Rework"),
         ).\
+        filter(utility_start.timestamp >= time_from).\
+        filter(utility_start.timestamp < time_to).\
         statement
 
     df = pandas.read_sql(
@@ -300,16 +370,18 @@ def query_utility_operator():
     df['Desc'] = 'U : Utility'
     return df
 
-def get_operator_report(date_time=None, shift=None):
-    if date_time == None:
-        date_time = get_curr_datetime()
-    if shift == None:
-        shift = get_curr_shift()
+def get_operator_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
+    time_from, time_to = _calculate_datetime_range(
+        date_from=date_time_from,
+        shift_from=shift_from,
+        date_to=date_time_to,
+        shift_to=shift_to,
+    )
 
     df = pandas.concat([
-        query_utility_operator(), 
-        query_continued_downtime_operator(), 
-        query_last_downtime_operator()
+        query_utility_operator(time_from, time_to), 
+        query_continued_downtime_operator(time_from, time_to), 
+        query_last_downtime_operator(time_from, time_to)
         ], axis=0).sort_values(by=['Operator', 'Start']).reset_index(drop=True)
 
     df['Tanggal'] = pandas.to_datetime(df.Start, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y')
@@ -318,12 +390,11 @@ def get_operator_report(date_time=None, shift=None):
     df['Stop'] = pandas.to_datetime(df.Stop, utc=True).map(lambda x: x.tz_convert('Asia/Jakarta')).dt.strftime('%m/%d/%Y %H:%M:%S')
     df['Shift'] = df['Start'].apply(lambda x: _calculate_shift(x))
     
-    df = df.loc[df['Tanggal'] == date_time.strftime('%m/%d/%Y')]
-    df = df.loc[df['Shift'] == shift]
-
     for index, row in df.iterrows():
         if index == 0:
             continue
+
+        # Remove No Plan and BreakTime from Operator's Downtime
         if ((df.loc[index]['Operator'] == df.loc[index-1]['Operator']) and 
         (df.loc[index]['Start'] != df.loc[index-1]['Stop']) and 
         (df.loc[index]['Desc'][:2] != "NP" and df.loc[index]['Desc'][:2] != "BT")):
@@ -343,18 +414,39 @@ def get_operator_report(date_time=None, shift=None):
     df['Duration'] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
     df['Duration'] = df['Duration'].dt.total_seconds()
     df['Duration'] = df['Duration'].apply(lambda x: _convert_seconds(x))
+
     df = df.sort_values(by=['Operator', 'Start']).reset_index(drop=True)
+
     df = df.fillna(0)
     df['Qty'] = df['Qty'].astype(int)
     df['Reject'] = df['Reject'].astype(int)
     df['Rework'] = df['Rework'].astype(int)
+
     df.drop(['Start', 'Stop'], axis=1, inplace=True)
     header = ['Operator', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'MC', 'Kode Tooling', 'Common Tooling Name', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
     df = df[header]
     print(df)
-    df.to_csv(_get_csv_folder("operator", date_time, shift))
-    return df, _get_csv_filename("operator", date_time, shift)
+
+    df.to_csv(_get_csv_folder("operator", 
+        date_from=date_time_from,
+        shift_from=shift_from,
+        date_to=date_time_to,
+        shift_to=shift_to,
+    ))
+    return df, _get_csv_filename("operator", 
+        date_from=date_time_from,
+        shift_from=shift_from,
+        date_to=date_time_to,
+        shift_to=shift_to,
+    )
 
 if __name__ == "__main__":
     get_mesin_report()
     get_operator_report()
+    # print(_calculate_shift_from_datetime(datetime(2023,2,4,13,5)))
+    # print(_calculate_datetime_range(
+    #     date_from=datetime(2023,2,4),
+    #     shift_from=1,
+    #     date_to=datetime(2023,2,4),
+    #     shift_to=3,
+    # ))

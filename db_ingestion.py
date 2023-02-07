@@ -77,8 +77,8 @@ def import_data(filename, model, get_id, extract_data, data_not_null, offset):
         except:
             csvreader = list(csv.reader(csvfile, delimiter=","))
         all_data_id = [ data.id for data in session.query(model).distinct() ]
-        data_to_input = { get_id(i, offset) : extract_data(i, offset) for i in csvreader[1:] \
-            if (data_not_null(i, offset) and get_id(i, offset) not in all_data_id) }
+        data_to_input = { id : extract_data(i, offset) for i in csvreader[1:] \
+            if (data_not_null(i, offset) and (id := get_id(i, offset)) not in all_data_id) }
         session.add_all(list(data_to_input.values()))
 
 def import_tooling(filename, offset=0):
