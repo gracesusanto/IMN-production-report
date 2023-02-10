@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  app:
+    container_name: app
+    build:
+      context: ./services/web/
+      dockerfile: Dockerfile.prod
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    expose:
+      - 80
+    depends_on:
+      - db
+    restart: always
+    command: gunicorn main:app --proxy-headers --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080
+  db:
+    container_name: postgresql_db
+    image: postgres
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data/
+    expose:
+      - 8080
+    restart: always
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+  nginx:
+    build: ./services/nginx
+    ports:
+      - 1337:80
+    depends_on:
+      - app
+    restart: always
+
+volumes:
+  postgres_data_prod:
