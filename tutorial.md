@@ -11,6 +11,9 @@ docker-compose up
 docker-compose run app python3 db_ingestion.py
 docker-compose run app python3 generate_report.py
 
+docker-compose -f docker-compose.prod.yml build
+docker-compose -f docker-compose.prod.yml up
+
 docker exec -it app /bin/bash
 cd app/cmd
 python3 -m app.cmd.db_ingestion
