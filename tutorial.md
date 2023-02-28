@@ -18,6 +18,8 @@ python3 -m app.cmd.generate_report
 python3 db_ingestion.py
 python3 generate_report.py
 
+docker logs --follow app
+
 ### Cara Memasukan Database
 1. Taruh data tooling di `data_all.csv` dengan format 
 ```['M/C','Tonase','Customer','Part No.','Part Name','Child Part Name','Kode Tooling','Common Tooling Name','Proses','STD Jam (Pcs)','Operator']```

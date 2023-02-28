@@ -6,7 +6,7 @@ RUN apt-get update && \
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY ./app/requirements.txt requirements.txt
+COPY ./requirements.txt requirements.txt
 RUN pip3 install --upgrade pip
 RUN pip3 install --no-cache-dir --upgrade -r requirements.txt
 COPY ./app /app
