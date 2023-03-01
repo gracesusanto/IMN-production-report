@@ -123,18 +123,6 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     # Insert mesin's last downtime
     last_downtime = models.LastDowntimeMesin(
         mesin_id = mesin_id,
-        start_time = mesin_status.last_stop,
-        stop_time = start_entity,
-        reject = reject,
-        rework = rework,
-        downtime_category = prev_downtime_category
-    )
-    session.add(last_downtime)
-    session.commit()
-
-    # Update downtime for prev operator
-    # if (get_downtime_category(prev_downtime_category) != "NP"):
-    last_downtime_operator = models.LastDowntimeOperator(
         operator_id = mesin_status.last_operator_id,
         start_time = mesin_status.last_stop,
         stop_time = start_entity,
@@ -142,7 +130,7 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
         rework = rework,
         downtime_category = prev_downtime_category
     )
-    session.add(last_downtime_operator)
+    session.add(last_downtime)
     session.commit()
 
     if (mesin_status.last_operator_id != operator_id):
@@ -172,7 +160,7 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     session.commit()
 
 
-def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_category, reject, rework, session):
+def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_category, reject, rework, coil_no, lot_no, session):
     logging.info("First stop activity")
     # Insert to Stop Table
     stop_entity = models.Stop(
@@ -219,25 +207,16 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
     # Insert mesin's utility table
     utility = models.UtilityMesin(
         mesin_id = mesin_id,
-        start_time = mesin_status.last_start,
-        stop_time = stop_entity,
-        output = output,
-        reject = reject,
-        rework = rework,
-    )
-    session.add(utility)
-    session.commit()
-
-    # Update downtime for prev operator
-    utility_operator = models.UtilityOperator(
         operator_id = mesin_status.last_operator_id,
         start_time = mesin_status.last_start,
         stop_time = stop_entity,
         output = output,
         reject = reject,
         rework = rework,
+        coil_no = coil_no,
+        lot_no = lot_no,
     )
-    session.add(utility_operator)
+    session.add(utility)
     session.commit()
 
     displayed_status =  get_displayed_status(downtime_category)
@@ -268,8 +247,6 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
     mesin_status.category_downtime = downtime_category
 
     mesin_status.displayed_status = displayed_status
-
-
 
     session.commit()
 
@@ -319,17 +296,6 @@ def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category,
     # Insert mesin's continued downtime table
     continued_downtime = models.ContinuedDowntimeMesin(
         mesin_id = mesin_id,
-        start_time = mesin_status.last_stop,
-        stop_time = stop_entity,
-        reject = reject,
-        rework = rework,
-        downtime_category = prev_downtime_category
-    )
-    session.add(continued_downtime)
-    session.commit()
-
-    # if (get_downtime_category(prev_downtime_category) != "NP"):
-    continued_downtime_operator = models.ContinuedDowntimeOperator(
         operator_id = mesin_status.last_operator_id,
         start_time = mesin_status.last_stop,
         stop_time = stop_entity,
@@ -337,7 +303,7 @@ def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category,
         rework = rework,
         downtime_category = prev_downtime_category
     )
-    session.add(continued_downtime_operator)
+    session.add(continued_downtime)
     session.commit()
 
     displayed_status =  get_displayed_status(downtime_category)

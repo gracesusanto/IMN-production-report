@@ -33,10 +33,11 @@ def add_tooling(tooling: schema.Tooling, session=Sessioner):
 
 @app.post("/report/mesin")
 def get_report(request: schema.ReportRequest):
-    date_time = request.date if request.date is not None else generate_report.get_curr_datetime()
-    shift = request.shift if request.shift is not None else generate_report.get_curr_shift()
-
-    df, filename = generate_report.get_mesin_report(date_time, shift)
+    df, filename = generate_report.get_mesin_report(
+        date_time_from=request.date_from, 
+        shift_from=request.shift_from, 
+        date_time_to=request.date_to, 
+        shift_to=request.shift_to)
     response = fastapi.responses.StreamingResponse(io.StringIO(df.to_csv(index=False)), media_type="text/csv")
 
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
@@ -44,59 +45,15 @@ def get_report(request: schema.ReportRequest):
 
 @app.post("/report/operator")
 def get_report(request: schema.ReportRequest):
-    date_time = request.date if request.date is not None else generate_report.get_curr_datetime()
-    shift = request.shift if request.shift is not None else generate_report.get_curr_shift()
-
-    df, filename = generate_report.get_operator_report(date_time, shift)
+    df, filename = generate_report.get_operator_report(
+        date_time_from=request.date_from, 
+        shift_from=request.shift_from, 
+        date_time_to=request.date_to, 
+        shift_to=request.shift_to)
     response = fastapi.responses.StreamingResponse(io.StringIO(df.to_csv(index=False)), media_type="text/csv")
 
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
-
-@app.get("/tooling/")
-def get_tooling(session=Sessioner):
-    toolings = session.query(models.Tooling).all()
-    return toolings
-
-@app.get("/mesin/")
-def get_mesin(session=Sessioner):
-    mesin = session.query(models.Mesin).all()
-    return mesin
-
-@app.get("/operator/")
-def get_operator(session=Sessioner):
-    operators = session.query(models.Operator).all()
-    return operators
-
-@app.get("/utility-mesin/")
-def get_utility_mesin(session=Sessioner):
-    utility_mesin = session.query(models.UtilityMesin).all()
-    return utility_mesin
-
-@app.get("/last-downtime-mesin/")
-def get_last_downtime_mesin(session=Sessioner):
-    last_downtime_mesin = session.query(models.LastDowntimeMesin).all()
-    return last_downtime_mesin
-
-@app.get("/continued-downtime-mesin/")
-def get_continued_downtime_mesin(session=Sessioner):
-    continued_downtime_mesin = session.query(models.ContinuedDowntimeMesin).all()
-    return continued_downtime_mesin
-
-@app.get("/utility-operator/")
-def get_utility_operator(session=Sessioner):
-    utility_operator = session.query(models.UtilityOperator).all()
-    return utility_operator
-
-@app.get("/last-downtime-operator/")
-def get_last_downtime_operator(session=Sessioner):
-    last_downtime_operator = session.query(models.LastDowntimeOperator).all()
-    return last_downtime_operator
-
-@app.get("/continued-downtime-operator/")
-def get_continued_downtime_operator(session=Sessioner):
-    continued_downtime_operator = session.query(models.ContinuedDowntimeOperator).all()
-    return continued_downtime_operator
 
 @app.get("/mesin-status-all/")
 def get_mesin_status(session=Sessioner):
@@ -120,31 +77,6 @@ def get_mesin_status(session=Sessioner):
         ).order_by(models.MesinStatus.id.asc()).\
         all()
     return { "details": mesin_status + mesin_status_idle }
-
-@app.get("/operator-status-all/")
-def get_operator_status_all(session=Sessioner):
-    operator_status = session.query(models.OperatorStatus).all()
-    return operator_status
-
-@app.get("/operator/status/{operator_id}")
-def get_operator_status(operator_id: str, session=Sessioner):
-    is_running, operator_status, tooling_id, mesin_id = business_logic.is_operator_running(operator_id, session)
-    return {
-        "isRunning": is_running,
-        "operatorStatus": operator_status,
-        "toolingId": tooling_id,
-        "mesinId": mesin_id
-    }
-
-@app.get("/start/")
-def get_start(session=Sessioner):
-    start = session.query(models.Start).all()
-    return start
-    
-@app.get("/stop/")
-def get_stop(session=Sessioner):
-    stop = session.query(models.Stop).all()
-    return stop
 
 @app.get("/tooling/{tooling_id}", response_model=schema.Tooling)
 def get_tooling(tooling_id: str, session=Sessioner):
@@ -215,6 +147,8 @@ def post_activity(activity: schema.Activity, session=Sessioner):
                 output=activity.output,
                 reject=activity.reject,
                 rework=activity.rework,
+                coil_no=activity.coil_no,
+                lot_no=activity.lot_no,
                 downtime_category=activity.category_downtime,
                 session=session
             )
@@ -241,6 +175,77 @@ def get_mesin_status(mesin_id: str, session=Sessioner):
     if mesin_status is not None:
         status = mesin_status.status
     return {"status": status}
+
+# ----- GET APIs ----- #
+@app.get("/tooling/")
+def get_tooling(session=Sessioner):
+    toolings = session.query(models.Tooling).all()
+    return toolings
+
+@app.get("/mesin/")
+def get_mesin(session=Sessioner):
+    mesin = session.query(models.Mesin).all()
+    return mesin
+
+@app.get("/operator/")
+def get_operator(session=Sessioner):
+    operators = session.query(models.Operator).all()
+    return operators
+
+@app.get("/utility-mesin/")
+def get_utility_mesin(session=Sessioner):
+    utility_mesin = session.query(models.UtilityMesin).all()
+    return utility_mesin
+
+@app.get("/last-downtime-mesin/")
+def get_last_downtime_mesin(session=Sessioner):
+    last_downtime_mesin = session.query(models.LastDowntimeMesin).all()
+    return last_downtime_mesin
+
+@app.get("/continued-downtime-mesin/")
+def get_continued_downtime_mesin(session=Sessioner):
+    continued_downtime_mesin = session.query(models.ContinuedDowntimeMesin).all()
+    return continued_downtime_mesin
+
+@app.get("/utility-operator/")
+def get_utility_operator(session=Sessioner):
+    utility_operator = session.query(models.UtilityOperator).all()
+    return utility_operator
+
+@app.get("/last-downtime-operator/")
+def get_last_downtime_operator(session=Sessioner):
+    last_downtime_operator = session.query(models.LastDowntimeOperator).all()
+    return last_downtime_operator
+
+@app.get("/continued-downtime-operator/")
+def get_continued_downtime_operator(session=Sessioner):
+    continued_downtime_operator = session.query(models.ContinuedDowntimeOperator).all()
+    return continued_downtime_operator
+
+@app.get("/operator-status-all/")
+def get_operator_status_all(session=Sessioner):
+    operator_status = session.query(models.OperatorStatus).all()
+    return operator_status
+
+@app.get("/operator/status/{operator_id}")
+def get_operator_status(operator_id: str, session=Sessioner):
+    is_running, operator_status, tooling_id, mesin_id = business_logic.is_operator_running(operator_id, session)
+    return {
+        "isRunning": is_running,
+        "operatorStatus": operator_status,
+        "toolingId": tooling_id,
+        "mesinId": mesin_id
+    }
+
+@app.get("/start/")
+def get_start(session=Sessioner):
+    start = session.query(models.Start).all()
+    return start
+    
+@app.get("/stop/")
+def get_stop(session=Sessioner):
+    stop = session.query(models.Stop).all()
+    return stop
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
