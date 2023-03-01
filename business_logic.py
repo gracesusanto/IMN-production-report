@@ -160,7 +160,7 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     session.commit()
 
 
-def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_category, reject, rework, session):
+def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_category, reject, rework, coil_no, lot_no, session):
     logging.info("First stop activity")
     # Insert to Stop Table
     stop_entity = models.Stop(
@@ -213,6 +213,8 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
         output = output,
         reject = reject,
         rework = rework,
+        coil_no = coil_no,
+        lot_no = lot_no,
     )
     session.add(utility)
     session.commit()
@@ -245,8 +247,6 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
     mesin_status.category_downtime = downtime_category
 
     mesin_status.displayed_status = displayed_status
-
-
 
     session.commit()
 
