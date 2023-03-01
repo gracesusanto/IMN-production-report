@@ -31,8 +31,10 @@ class Activity(BaseModel):
     rework: Union[int, None] = None
 
 class ReportRequest(BaseModel):
-    date: Union[date, None]
-    shift: Union[int, None] = 1
+    date_from: Union[date, None] = None
+    shift_from: Union[int, None] = 1
+    date_to: Union[date, None] = None
+    shift_to: Union[int, None] = 3
 
 class CheckOperatorStatus(BaseModel):
     tooling_id: str
