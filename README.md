@@ -1,11 +1,11 @@
 # IMN Production Report
 
-This is the backend for IMM Production Report
+This is the backend for IMN Production Report
 
 ## Local Setup
 
 Docker is used to run the backend server and database. To run the backend endpoints, 
-you will need to installvDocker and docker-compose.
+you will need to install Docker and docker-compose.
 
 To install docker: https://docs.docker.com/get-docker/
 
