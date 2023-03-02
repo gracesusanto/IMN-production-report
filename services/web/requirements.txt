@@ -1,12 +1,12 @@
 alembic >= 1.9.2
 fastapi >= 0.89.1
-fastapi-sqlalchemy
+fastapi-sqlalchemy >= 0.2.1
 wheel
 pandas >= 1.5.3
 psycopg2 >= 2.9.5
 pydantic >= 1.10.4
 pydantic-sqlalchemy >= 0.0.9
 python-dotenv >= 0.21.1
-sqlalchemy
+sqlalchemy >= 1.4.46
 strawberry-sqlalchemy-mapper >= 0.1.0
 uvicorn >= 0.20.0

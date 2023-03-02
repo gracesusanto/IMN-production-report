@@ -1,16 +1,11 @@
 from enum import Enum
-from typing import Optional
+from typing import Union
 from datetime import date
-from fastapi import HTTPException
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 
 import app.model.models as models
-
-from typing import TypeVar, Optional
-
-T = TypeVar('T')
 
 Mesin = sqlalchemy_to_pydantic(models.Mesin, exclude=['id', 'time_created', 'time_updated'])
 
@@ -25,56 +20,25 @@ class ActivityType(str, Enum):
     FIRST_STOP = "first_stop"
     CONTINUE_STOP = "continue_stop"
 
-
-class Detail(BaseModel):
+class Activity(BaseModel):
+    type: ActivityType
     tooling_id: str
     mesin_id: str
     operator_id: str
-
-    @validator("tooling_id")
-    def tooling_validation(cls, v):
-        if v and not v.startswith('TL-'):
-            raise HTTPException(status_code=400, detail="Invalid Tooling ID")
-        return v
-
-    @validator("mesin_id")
-    def mesin_validation(cls, v):
-        if v and not v.startswith('MC-'):
-            raise HTTPException(status_code=400, detail="Invalid Mesin ID")
-        return v
-
-    @validator("operator_id")
-    def operator_validation(cls, v):
-        if v and not v.startswith('OP-'):
-            raise HTTPException(status_code=400, detail="Invalid Operator ID")
-        return v
-
-class Activity(Detail):
-    type: ActivityType
-    category_downtime: Optional[str]
-    output: Optional[int] = None
-    reject: Optional[int] = None
-    rework: Optional[int] = None
+    category_downtime: Union[str, None]
+    output: Union[int, None] = None
+    reject: Union[int, None] = None
+    rework: Union[int, None] = None
+    coil_no: Union[int, None] = None
+    lot_no: Union[int, None] = None
 
 class ReportRequest(BaseModel):
-    date: Optional[date]
-    shift: Optional[int] = 1
+    date_from: Union[date, None] = None
+    shift_from: Union[int, None] = 1
+    date_to: Union[date, None] = None
+    shift_to: Union[int, None] = 3
 
-# class MesinStatusAll(BaseModel):
-#     Mesin: str
-#     Tooling: str
-#     Operator: Optional[str]
-#     Status: models.DisplayedStatus
-#     Kategori_Downtime: str
-
-#     class Config:
-#         orm_mode = True
-
-class DetailSchema(BaseModel):
-    status: str
-    message: str
-    result: Optional[T] = None
-
-class ResponseSchema(BaseModel):
-    detail: str
-    result: Optional[T] = None
+class CheckOperatorStatus(BaseModel):
+    tooling_id: str
+    mesin_id: str
+    operator_id: str
