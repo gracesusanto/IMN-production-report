@@ -70,7 +70,7 @@ def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
 
 def _get_csv_folder(type, date_from, shift_from, date_to, shift_to):
     filename = _get_csv_filename(type, date_from, shift_from, date_to, shift_to)
-    directory = f"report/{type}"
+    directory = f"data/report/{type}"
     if not os.path.exists(directory):
         os.makedirs(directory)
 
