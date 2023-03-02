@@ -35,7 +35,7 @@ $ docker-compose up
 ```
 
 Make sure that these have run successfully. A good way to confirm 
-that things are working is to take a look at the API docs at http://localhost:8080/docs/
+that things are working is to take a look at the API docs at http://localhost:8000/docs/
 Note that for `dev`, the postgres database schemas *has been automatically migrated* by
 the `alembic upgrade head` command run when spinning up the docker container. 
 All you have to do next is to populate the database.
