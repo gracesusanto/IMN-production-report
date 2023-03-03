@@ -155,7 +155,7 @@ engine = database.get_engine()
 session = sa.orm.sessionmaker(autocommit=False, autoflush=False,
                                       bind=engine)()
 
-col_order = ['MC', 'Operator', 'Kode Tooling', 'Common Tooling Name', 'Start', 'Stop', 'Desc', 'Qty', 'Reject', 'Rework', 'Keterangan']
+col_order = ['MC', 'Operator', 'Kode Tooling', 'Common Tooling Name', 'Start', 'Stop', 'Desc', 'Qty', 'Reject', 'Rework']
 
 def query_continued_downtime(time_from, time_to):
     continued_downtime_start = aliased(models.Stop)
@@ -187,7 +187,6 @@ def query_continued_downtime(time_from, time_to):
         con = engine
     )
     df['Qty'] = 0
-    df['Keterangan'] = ''
     return df[col_order]
 
 def query_last_downtime(time_from, time_to):
@@ -220,7 +219,6 @@ def query_last_downtime(time_from, time_to):
         con = engine
     )
     df['Qty'] = 0
-    df['Keterangan'] = ''
     return df[col_order]
 
 def query_utility(time_from, time_to):
@@ -243,9 +241,6 @@ def query_utility(time_from, time_to):
             models.UtilityMesin.output.label("Qty"),
             models.UtilityMesin.reject.label("Reject"),
             models.UtilityMesin.rework.label("Rework"),
-            models.UtilityMesin.coil_no.label("Coil No"),
-            models.UtilityMesin.lot_no.label("Lot No"),
-            models.UtilityMesin.pack_no.label("Pack No"),
         ).\
         filter(utility_start.timestamp >= time_from).\
         filter(utility_start.timestamp < time_to).\
@@ -256,10 +251,6 @@ def query_utility(time_from, time_to):
         con = engine
     )
     df['Desc'] = 'U : Utility'
-    df['Coil No'] = df['Coil No'].fillna('').replace('-', '')
-    df['Lot No'] = df['Lot No'].fillna('').replace('-', '')
-    df['Pack No'] = df['Pack No'].fillna('').replace('-', '')
-    df['Keterangan'] = df.apply(lambda row: _generate_keterangan(row), axis=1)
     return df[col_order]
 
 def get_mesin_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
