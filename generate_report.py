@@ -141,6 +141,16 @@ def _calculate_datetime_range(date_from=None, shift_from: str="1", date_to=None,
 
     return time_from, time_to
 
+def _generate_keterangan(row):
+    keterangan = (f"Coil No: {row['Coil No']}, " if row['Coil No'] else "") \
+    + (f"Lot No: {row['Lot No']}, " if row['Lot No'] else "") \
+    + (f"Pack No: {row['Pack No']}" if row['Pack No'] else "")
+
+    if keterangan[-2::] == ", ":
+        keterangan = keterangan[:-2]
+    return keterangan
+    
+
 engine = database.get_engine()
 session = sa.orm.sessionmaker(autocommit=False, autoflush=False,
                                       bind=engine)()
@@ -235,6 +245,7 @@ def query_utility(time_from, time_to):
             models.UtilityMesin.rework.label("Rework"),
             models.UtilityMesin.coil_no.label("Coil No"),
             models.UtilityMesin.lot_no.label("Lot No"),
+            models.UtilityMesin.pack_no.label("Pack No"),
         ).\
         filter(utility_start.timestamp >= time_from).\
         filter(utility_start.timestamp < time_to).\
@@ -245,9 +256,10 @@ def query_utility(time_from, time_to):
         con = engine
     )
     df['Desc'] = 'U : Utility'
-    df['Coil No'] = df['Coil No'].fillna(-1).astype(int).replace(-1, '')
-    df['Lot No'] = df['Lot No'].fillna(-1).astype(int).replace(-1, '')
-    df['Keterangan'] = df.apply(lambda row: (f"Coil No: {row['Coil No']}. " if row['Coil No'] else "") + (f"Lot No: {row['Lot No']}" if row['Lot No'] else ""), axis=1)
+    df['Coil No'] = df['Coil No'].fillna('').replace('-', '')
+    df['Lot No'] = df['Lot No'].fillna('').replace('-', '')
+    df['Pack No'] = df['Pack No'].fillna('').replace('-', '')
+    df['Keterangan'] = df.apply(lambda row: _generate_keterangan(row), axis=1)
     return df[col_order]
 
 def get_mesin_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
@@ -332,6 +344,7 @@ def query_continued_downtime_operator(time_from, time_to):
         con = engine
     )
     df['Qty'] = 0
+    df['Keterangan'] = ''
     return df
 
 def query_last_downtime_operator(time_from, time_to):
@@ -364,6 +377,7 @@ def query_last_downtime_operator(time_from, time_to):
         con = engine
     )
     df['Qty'] = 0
+    df['Keterangan'] = ''
     return df
 
 def query_utility_operator(time_from, time_to):
@@ -386,6 +400,9 @@ def query_utility_operator(time_from, time_to):
             models.UtilityMesin.output.label("Qty"),
             models.UtilityMesin.reject.label("Reject"),
             models.UtilityMesin.rework.label("Rework"),
+            models.UtilityMesin.coil_no.label("Coil No"),
+            models.UtilityMesin.lot_no.label("Lot No"),
+            models.UtilityMesin.pack_no.label("Pack No"),
         ).\
         filter(utility_start.timestamp >= time_from).\
         filter(utility_start.timestamp < time_to).\
@@ -396,6 +413,11 @@ def query_utility_operator(time_from, time_to):
         con = engine
     )
     df['Desc'] = 'U : Utility'
+    df['Coil No'] = df['Coil No'].fillna('').replace('-', '')
+    df['Lot No'] = df['Lot No'].fillna('').replace('-', '')
+    df['Pack No'] = df['Pack No'].fillna('').replace('-', '')
+    df['Keterangan'] = df.apply(lambda row: _generate_keterangan(row), axis=1)
+    df.drop(['Coil No', 'Lot No', 'Pack No'], axis=1)
     return df
 
 def get_operator_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
@@ -452,7 +474,7 @@ def get_operator_report(date_time_from=None, shift_from=None, date_time_to=None,
     df['Rework'] = df['Rework'].astype(int)
 
     df.drop(['Start', 'Stop'], axis=1, inplace=True)
-    header = ['Operator', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'MC', 'Kode Tooling', 'Common Tooling Name', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration']
+    header = ['Operator', 'Shift', 'Tanggal', 'StartTime', 'StopTime', 'MC', 'Kode Tooling', 'Common Tooling Name', 'Qty', 'Reject', 'Rework', 'Desc', 'Duration', 'Keterangan']
     df = df[header]
     print(df)
 
