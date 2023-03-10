@@ -149,6 +149,7 @@ def post_activity(activity: schema.Activity, session=Sessioner):
                 rework=activity.rework,
                 coil_no=activity.coil_no,
                 lot_no=activity.lot_no,
+                pack_no=activity.pack_no,
                 downtime_category=activity.category_downtime,
                 session=session
             )

@@ -29,8 +29,9 @@ class Activity(BaseModel):
     output: Union[int, None] = None
     reject: Union[int, None] = None
     rework: Union[int, None] = None
-    coil_no: Union[int, None] = None
-    lot_no: Union[int, None] = None
+    coil_no: Union[str, None] = None
+    lot_no: Union[str, None] = None
+    pack_no: Union[str, None] = None
 
 class ReportRequest(BaseModel):
     date_from: Union[date, None] = None

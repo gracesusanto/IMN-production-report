@@ -73,8 +73,9 @@ class UtilityMesin(Base):
     output = sa.Column(sa.Integer)
     reject = sa.Column(sa.Integer, nullable=True)
     rework = sa.Column(sa.Integer, nullable=True)
-    coil_no = sa.Column(sa.Integer, nullable=True)
-    lot_no = sa.Column(sa.Integer, nullable=True)
+    coil_no = sa.Column(sa.String, nullable=True)
+    lot_no = sa.Column(sa.String, nullable=True)
+    pack_no = sa.Column(sa.String, nullable=True)
 
 class LastDowntimeMesin(Base):
     __tablename__ = "last_downtime_mesin"
