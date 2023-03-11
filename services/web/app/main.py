@@ -193,35 +193,10 @@ def get_operator(session=Sessioner):
     operators = session.query(models.Operator).all()
     return operators
 
-@app.get("/utility-mesin/")
-def get_utility_mesin(session=Sessioner):
-    utility_mesin = session.query(models.UtilityMesin).all()
-    return utility_mesin
-
-@app.get("/last-downtime-mesin/")
-def get_last_downtime_mesin(session=Sessioner):
-    last_downtime_mesin = session.query(models.LastDowntimeMesin).all()
-    return last_downtime_mesin
-
-@app.get("/continued-downtime-mesin/")
-def get_continued_downtime_mesin(session=Sessioner):
-    continued_downtime_mesin = session.query(models.ContinuedDowntimeMesin).all()
-    return continued_downtime_mesin
-
-@app.get("/utility-operator/")
-def get_utility_operator(session=Sessioner):
-    utility_operator = session.query(models.UtilityOperator).all()
-    return utility_operator
-
-@app.get("/last-downtime-operator/")
-def get_last_downtime_operator(session=Sessioner):
-    last_downtime_operator = session.query(models.LastDowntimeOperator).all()
-    return last_downtime_operator
-
-@app.get("/continued-downtime-operator/")
-def get_continued_downtime_operator(session=Sessioner):
-    continued_downtime_operator = session.query(models.ContinuedDowntimeOperator).all()
-    return continued_downtime_operator
+@app.get("/activity-mesin/")
+def get_activity_mesin(session=Sessioner):
+    activity_mesin = session.query(models.ActivityMesin).all()
+    return activity_mesin
 
 @app.get("/operator-status-all/")
 def get_operator_status_all(session=Sessioner):

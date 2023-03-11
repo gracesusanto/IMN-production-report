@@ -13,8 +13,6 @@ Tooling = sqlalchemy_to_pydantic(models.Tooling, exclude=['id', 'time_created', 
 
 Operator = sqlalchemy_to_pydantic(models.Operator, exclude=['id', 'time_created', 'time_updated'])
 
-Start = sqlalchemy_to_pydantic(models.Start)
-
 class ActivityType(str, Enum):
     START = "start"
     FIRST_STOP = "first_stop"

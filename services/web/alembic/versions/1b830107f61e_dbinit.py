@@ -1,8 +1,8 @@
 """dbinit
 
-Revision ID: aba93a912ede
+Revision ID: 1b830107f61e
 Revises: 
-Create Date: 2023-03-02 21:44:11.801879
+Create Date: 2023-03-11 00:08:49.579681
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'aba93a912ede'
+revision = '1b830107f61e'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -50,6 +50,20 @@ def upgrade():
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_tooling_id'), 'tooling', ['id'], unique=False)
+    op.create_table('mesin_log',
+    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('tooling_id', sa.String(), nullable=True),
+    sa.Column('mesin_id', sa.String(), nullable=True),
+    sa.Column('operator_id', sa.String(), nullable=True),
+    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('output', sa.Integer(), nullable=True),
+    sa.Column('downtime_category', sa.String(), nullable=False),
+    sa.Column('category', sa.Enum('START', 'STOP', name='category'), nullable=True),
+    sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
+    sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
+    sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('operator_status',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('status', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='operator_status_enum'), nullable=False),
@@ -61,60 +75,27 @@ def upgrade():
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_operator_status_id'), 'operator_status', ['id'], unique=False)
-    op.create_table('start',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('tooling_id', sa.String(), nullable=True),
-    sa.Column('mesin_id', sa.String(), nullable=True),
-    sa.Column('operator_id', sa.String(), nullable=True),
-    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
-    sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
-    sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('stop',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('tooling_id', sa.String(), nullable=True),
-    sa.Column('mesin_id', sa.String(), nullable=True),
-    sa.Column('operator_id', sa.String(), nullable=True),
-    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('output', sa.Integer(), nullable=True),
-    sa.Column('downtime_category', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
-    sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
-    sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('continued_downtime_mesin',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('operator_id', sa.String(), nullable=False),
-    sa.Column('mesin_id', sa.String(), nullable=False),
-    sa.Column('start_time_id', sa.Integer(), nullable=False),
-    sa.Column('stop_time_id', sa.Integer(), nullable=False),
-    sa.Column('reject', sa.Integer(), nullable=True),
-    sa.Column('rework', sa.Integer(), nullable=True),
-    sa.Column('downtime_category', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
-    sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
-    sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
-    sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('last_downtime_mesin',
+    op.create_table('activity_mesin',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('mesin_id', sa.String(), nullable=False),
     sa.Column('operator_id', sa.String(), nullable=False),
     sa.Column('start_time_id', sa.Integer(), nullable=False),
     sa.Column('stop_time_id', sa.Integer(), nullable=False),
-    sa.Column('reject', sa.Integer(), nullable=True),
-    sa.Column('rework', sa.Integer(), nullable=True),
-    sa.Column('downtime_category', sa.String(), nullable=True),
+    sa.Column('output', sa.Integer(), nullable=False),
+    sa.Column('reject', sa.Integer(), nullable=False),
+    sa.Column('rework', sa.Integer(), nullable=False),
+    sa.Column('coil_no', sa.String(), nullable=True),
+    sa.Column('lot_no', sa.String(), nullable=True),
+    sa.Column('pack_no', sa.String(), nullable=True),
+    sa.Column('downtime_category', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
-    sa.ForeignKeyConstraint(['start_time_id'], ['stop.id'], ),
-    sa.ForeignKeyConstraint(['stop_time_id'], ['start.id'], ),
+    sa.ForeignKeyConstraint(['start_time_id'], ['mesin_log.id'], ),
+    sa.ForeignKeyConstraint(['stop_time_id'], ['mesin_log.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_activity_mesin_start_time_id'), 'activity_mesin', ['start_time_id'], unique=False)
+    op.create_index(op.f('ix_activity_mesin_stop_time_id'), 'activity_mesin', ['stop_time_id'], unique=False)
     op.create_table('mesin_status',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('status', sa.Enum('RUNNING', 'IDLE', 'SETUP', name='status'), nullable=True),
@@ -126,44 +107,25 @@ def upgrade():
     sa.Column('displayed_status', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='displayed_status'), nullable=True),
     sa.ForeignKeyConstraint(['id'], ['mesin.id'], ),
     sa.ForeignKeyConstraint(['last_operator_id'], ['operator.id'], ),
-    sa.ForeignKeyConstraint(['last_start_id'], ['start.id'], ),
-    sa.ForeignKeyConstraint(['last_stop_id'], ['stop.id'], ),
+    sa.ForeignKeyConstraint(['last_start_id'], ['mesin_log.id'], ),
+    sa.ForeignKeyConstraint(['last_stop_id'], ['mesin_log.id'], ),
     sa.ForeignKeyConstraint(['last_tooling_id'], ['tooling.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_mesin_status_id'), 'mesin_status', ['id'], unique=False)
-    op.create_table('utility_mesin',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('mesin_id', sa.String(), nullable=False),
-    sa.Column('operator_id', sa.String(), nullable=False),
-    sa.Column('start_time_id', sa.Integer(), nullable=False),
-    sa.Column('stop_time_id', sa.Integer(), nullable=False),
-    sa.Column('output', sa.Integer(), nullable=True),
-    sa.Column('reject', sa.Integer(), nullable=True),
-    sa.Column('rework', sa.Integer(), nullable=True),
-    sa.Column('coil_no', sa.String(), nullable=True),
-    sa.Column('lot_no', sa.String(), nullable=True),
-    sa.Column('pack_no', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['mesin_id'], ['mesin.id'], ),
-    sa.ForeignKeyConstraint(['operator_id'], ['operator.id'], ),
-    sa.ForeignKeyConstraint(['start_time_id'], ['start.id'], ),
-    sa.ForeignKeyConstraint(['stop_time_id'], ['stop.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
     # ### end Alembic commands ###
 
 
 def downgrade():
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_table('utility_mesin')
     op.drop_index(op.f('ix_mesin_status_id'), table_name='mesin_status')
     op.drop_table('mesin_status')
-    op.drop_table('last_downtime_mesin')
-    op.drop_table('continued_downtime_mesin')
-    op.drop_table('stop')
-    op.drop_table('start')
+    op.drop_index(op.f('ix_activity_mesin_stop_time_id'), table_name='activity_mesin')
+    op.drop_index(op.f('ix_activity_mesin_start_time_id'), table_name='activity_mesin')
+    op.drop_table('activity_mesin')
     op.drop_index(op.f('ix_operator_status_id'), table_name='operator_status')
     op.drop_table('operator_status')
+    op.drop_table('mesin_log')
     op.drop_index(op.f('ix_tooling_id'), table_name='tooling')
     op.drop_table('tooling')
     op.drop_index(op.f('ix_operator_id'), table_name='operator')

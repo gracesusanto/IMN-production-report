@@ -78,10 +78,11 @@ def check_mesin(mesin_id, operator_id, session):
 
 def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     # Insert to Start Table
-    start_entity = models.Start(
+    start_entity = models.MesinLog(
         tooling_id = tooling_id,
         mesin_id = mesin_id,
-        operator_id = operator_id
+        operator_id = operator_id,
+        category = models.MesinLogEnum.START
     )
     session.add(start_entity)
     session.commit()
@@ -94,10 +95,11 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     )
     if mesin_status is None:
         # Create mesin status, insert last stop 5 seconds before starting
-        first_stop_mesin = models.Stop(
+        first_stop_mesin = models.MesinLog(
             mesin_id = mesin_id,
             timestamp = start_entity.timestamp - timedelta(seconds=5),
-            downtime_category = "Object Creation"
+            downtime_category = "Object Creation",
+            category = models.MesinLogEnum.STOP
         )
         session.add(first_stop_mesin)
         session.commit()
@@ -120,7 +122,7 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     prev_downtime_category = mesin_status.last_stop.downtime_category
 
     # Insert mesin's last downtime
-    last_downtime = models.LastDowntimeMesin(
+    last_downtime = models.ActivityMesin(
         mesin_id = mesin_id,
         operator_id = mesin_status.last_operator_id,
         start_time = mesin_status.last_stop,
@@ -161,12 +163,13 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
 
 def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_category, reject, rework, session, coil_no="", lot_no="", pack_no=""):
     # Insert to Stop Table
-    stop_entity = models.Stop(
+    stop_entity = models.MesinLog(
         tooling_id = tooling_id,
         mesin_id = mesin_id,
         operator_id = operator_id,
         output = output,
-        downtime_category = downtime_category
+        downtime_category = downtime_category,
+        category = models.MesinLogEnum.STOP
     )
     session.add(stop_entity)
     session.commit()
@@ -179,9 +182,10 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
     )
     if mesin_status is None:
         # Create mesin status, insert last start 5 seconds before stopping
-        first_start_mesin = models.Start(
+        first_start_mesin = models.MesinLog(
             mesin_id = mesin_id,
-            timestamp = stop_entity.timestamp - timedelta(seconds=5)
+            timestamp = stop_entity.timestamp - timedelta(seconds=5),
+            category = models.MesinLogEnum.START
         )
         session.add(first_start_mesin)
         session.commit()
@@ -202,7 +206,7 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
         )
 
     # Insert mesin's utility table
-    utility = models.UtilityMesin(
+    utility = models.ActivityMesin(
         mesin_id = mesin_id,
         operator_id = mesin_status.last_operator_id,
         start_time = mesin_status.last_start,
@@ -250,11 +254,12 @@ def first_stop_activity(tooling_id, mesin_id, operator_id, output, downtime_cate
 
 def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category, reject, rework, session):
     # Insert to Stop Table
-    stop_entity = models.Stop(
+    stop_entity = models.MesinLog(
         tooling_id = tooling_id,
         mesin_id = mesin_id,
         operator_id = operator_id,
-        downtime_category = downtime_category
+        downtime_category = downtime_category,
+        category = models.MesinLogEnum.STOP
     )
     session.add(stop_entity)
     session.commit()
@@ -267,9 +272,10 @@ def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category,
     )
     if mesin_status is None:
         # Create mesin status, insert last start 5 seconds before stopping
-        first_start_mesin = models.Start(
+        first_start_mesin = models.MesinLog(
             mesin_id = mesin_id,
-            timestamp = stop_entity.timestamp - timedelta(seconds=5)
+            timestamp = stop_entity.timestamp - timedelta(seconds=5),
+            category = models.MesinLogEnum.START
         )
         session.add(first_start_mesin)
         session.commit()
@@ -292,7 +298,7 @@ def continue_stop_activity(tooling_id, mesin_id, operator_id, downtime_category,
     prev_downtime_category = mesin_status.last_stop.downtime_category
     
     # Insert mesin's continued downtime table
-    continued_downtime = models.ContinuedDowntimeMesin(
+    continued_downtime = models.ActivityMesin(
         mesin_id = mesin_id,
         operator_id = mesin_status.last_operator_id,
         start_time = mesin_status.last_stop,

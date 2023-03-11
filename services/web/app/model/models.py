@@ -43,65 +43,39 @@ class Operator(Base):
     time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
-class Start(Base):
-    __tablename__ = "start"
-    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"))
-    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"))
-    operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"))
-    timestamp = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
+@strawberry.enum
+class MesinLogEnum(Enum):
+    """Start / Stop Mesin"""
 
-class Stop(Base):
-    __tablename__ = "stop"
+    START = "START"
+    STOP = "STOP"
+
+class MesinLog(Base):
+    __tablename__ = "mesin_log"
     id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
     tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"))
     mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"))
     operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"))
     timestamp = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
     output = sa.Column(sa.Integer, nullable=True)
-    downtime_category = sa.Column(sa.String)
-
-class UtilityMesin(Base):
-    __tablename__ = "utility_mesin"
+    downtime_category = sa.Column(sa.String, nullable=False, default="U : Utility")
+    category = sa.Column(sa.Enum(MesinLogEnum, name="category"), default=MesinLogEnum.START, nullable=True)
+class ActivityMesin(Base):
+    __tablename__ = "activity_mesin"
     id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
     mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
     operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False)
-    start_time_id = sa.Column(sa.Integer, sa.ForeignKey("start.id"), nullable=False)
-    stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
-    start_time = sa.orm.relationship("Start", backref="utility_mesin_start", uselist=False)
-    stop_time = sa.orm.relationship("Stop", backref="utility_mesin_stop", uselist=False)
-    output = sa.Column(sa.Integer)
-    reject = sa.Column(sa.Integer, nullable=True)
-    rework = sa.Column(sa.Integer, nullable=True)
+    start_time_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False, index=True)
+    stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False, index=True)
+    start_time = sa.orm.relationship("MesinLog", foreign_keys=[start_time_id], backref="activity_mesin_start", uselist=False)
+    stop_time = sa.orm.relationship("MesinLog", foreign_keys=[stop_time_id], backref="activity_mesin_stop", uselist=False)
+    output = sa.Column(sa.Integer, nullable=False, default=0)
+    reject = sa.Column(sa.Integer, nullable=False, default=0)
+    rework = sa.Column(sa.Integer, nullable=False, default=0)
     coil_no = sa.Column(sa.String, nullable=True)
     lot_no = sa.Column(sa.String, nullable=True)
     pack_no = sa.Column(sa.String, nullable=True)
-
-class LastDowntimeMesin(Base):
-    __tablename__ = "last_downtime_mesin"
-    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
-    operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False)
-    start_time_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
-    stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("start.id"), nullable=False)
-    start_time = sa.orm.relationship("Stop", backref="last_downtime_mesin_start", uselist=False)
-    stop_time = sa.orm.relationship("Start", backref="last_downtime_mesin_stop", uselist=False)
-    reject = sa.Column(sa.Integer, nullable=True)
-    rework = sa.Column(sa.Integer, nullable=True)
-    downtime_category = sa.Column(sa.String)
-
-class ContinuedDowntimeMesin(Base):
-    __tablename__ = "continued_downtime_mesin"
-    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False)
-    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
-    start_time_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
-    stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
-    start_time = sa.orm.relationship("Stop", foreign_keys=[start_time_id], backref="continued_downtime_mesin_start", uselist=False)
-    stop_time = sa.orm.relationship("Stop", foreign_keys=[stop_time_id], backref="continued_downtime_mesin_stop", uselist=False)
-    reject = sa.Column(sa.Integer, nullable=True)
-    rework = sa.Column(sa.Integer, nullable=True)
-    downtime_category = sa.Column(sa.String)
+    downtime_category = sa.Column(sa.String, nullable=False, default="U : Utility")
 
 @strawberry.enum
 class Status(Enum):
@@ -123,12 +97,12 @@ class MesinStatus(Base):
     __tablename__ = "mesin_status"
     id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False, primary_key=True, index=True)
     status = sa.Column(sa.Enum(Status, name="status"), default=Status.IDLE, nullable=True)
-    last_start_id = sa.Column(sa.Integer, sa.ForeignKey("start.id"), nullable=False)
-    last_stop_id = sa.Column(sa.Integer, sa.ForeignKey("stop.id"), nullable=False)
+    last_start_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False)
+    last_stop_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False)
     last_tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=False)
     last_operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=True)
-    last_start = sa.orm.relationship("Start", backref="mesin_status", uselist=False)
-    last_stop = sa.orm.relationship("Stop", backref="mesin_status", uselist=False)
+    last_start = sa.orm.relationship("MesinLog", foreign_keys=[last_start_id], backref="mesin_status_start", uselist=False)
+    last_stop = sa.orm.relationship("MesinLog", foreign_keys=[last_stop_id], backref="mesin_status_stop", uselist=False)
     last_tooling = sa.orm.relationship("Tooling", backref="curr_mesin", uselist=False)
     last_operator = sa.orm.relationship("Operator", backref="curr_mesin", uselist=False)
     category_downtime = sa.Column(sa.String, nullable=True)
