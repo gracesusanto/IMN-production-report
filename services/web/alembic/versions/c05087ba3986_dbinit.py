@@ -1,8 +1,8 @@
 """dbinit
 
-Revision ID: 1b830107f61e
+Revision ID: c05087ba3986
 Revises: 
-Create Date: 2023-03-11 00:08:49.579681
+Create Date: 2023-03-15 04:05:44.770610
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '1b830107f61e'
+revision = 'c05087ba3986'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -64,6 +64,7 @@ def upgrade():
     sa.ForeignKeyConstraint(['tooling_id'], ['tooling.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_mesin_log_id'), 'mesin_log', ['id'], unique=False)
     op.create_table('operator_status',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('status', sa.Enum('RUNNING', 'IDLE', 'DOWNTIME', name='operator_status_enum'), nullable=False),
@@ -125,6 +126,7 @@ def downgrade():
     op.drop_table('activity_mesin')
     op.drop_index(op.f('ix_operator_status_id'), table_name='operator_status')
     op.drop_table('operator_status')
+    op.drop_index(op.f('ix_mesin_log_id'), table_name='mesin_log')
     op.drop_table('mesin_log')
     op.drop_index(op.f('ix_tooling_id'), table_name='tooling')
     op.drop_table('tooling')

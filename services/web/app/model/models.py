@@ -52,7 +52,7 @@ class MesinLogEnum(Enum):
 
 class MesinLog(Base):
     __tablename__ = "mesin_log"
-    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
+    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True, index=True)
     tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"))
     mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"))
     operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"))
