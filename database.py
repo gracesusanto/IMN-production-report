@@ -5,12 +5,15 @@ import fastapi
 import sqlalchemy
 import sqlalchemy.orm
 
+
 def get_engine() -> sqlalchemy.engine.Engine:
     logging.info("Connecting to %s", os.environ["DATABASE_URL"])
     return sqlalchemy.create_engine(os.environ["DATABASE_URL"])
 
+
 SessionLocal = sqlalchemy.orm.sessionmaker(autocommit=False, autoflush=False)
 _is_bound = False
+
 
 # Helper function to get database session
 def _get_session():

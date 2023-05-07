@@ -25,7 +25,6 @@ target_metadata = models.Base.metadata
 
 
 def run_migrations_offline():
-
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         # url=url,
@@ -47,10 +46,8 @@ def run_migrations_online():
     )
 
     with connectable.connect() as connection:
-    # with database.get_engine().connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        # with database.get_engine().connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

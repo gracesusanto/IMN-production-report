@@ -7,18 +7,20 @@ from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 
 import models
 
-Mesin = sqlalchemy_to_pydantic(models.Mesin, exclude=['id', 'time_created', 'time_updated'])
+Mesin = sqlalchemy_to_pydantic(models.Mesin, exclude=["id", "time_created", "time_updated"])
 
-Tooling = sqlalchemy_to_pydantic(models.Tooling, exclude=['id', 'time_created', 'time_updated'])
+Tooling = sqlalchemy_to_pydantic(models.Tooling, exclude=["id", "time_created", "time_updated"])
 
-Operator = sqlalchemy_to_pydantic(models.Operator, exclude=['id', 'time_created', 'time_updated'])
+Operator = sqlalchemy_to_pydantic(models.Operator, exclude=["id", "time_created", "time_updated"])
 
 Start = sqlalchemy_to_pydantic(models.Start)
+
 
 class ActivityType(str, Enum):
     START = "start"
     FIRST_STOP = "first_stop"
     CONTINUE_STOP = "continue_stop"
+
 
 class Activity(BaseModel):
     type: ActivityType
@@ -33,11 +35,13 @@ class Activity(BaseModel):
     lot_no: Union[str, None] = ""
     pack_no: Union[str, None] = ""
 
+
 class ReportRequest(BaseModel):
     date_from: Union[date, None] = None
     shift_from: Union[int, None] = 1
     date_to: Union[date, None] = None
     shift_to: Union[int, None] = 3
+
 
 class CheckOperatorStatus(BaseModel):
     tooling_id: str

@@ -75,9 +75,7 @@ def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
         if shift_from == shift_to:
             return f"result_{type}_{date_from}_shift_{shift_from}.csv"
         else:
-            return (
-                f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}.csv"
-            )
+            return f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}.csv"
     else:
         return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}.csv"
 
@@ -119,9 +117,7 @@ def _calculate_datetime_from_shift(date_time, shift):
 
             # Get time in UTC (from GMT +7)
             time_from = datetime(year, month, day, hour_from, 0) - timedelta(hours=7)
-            time_to = time_from + timedelta(
-                hours=working_shift[day_of_week]["duration"]
-            )
+            time_to = time_from + timedelta(hours=working_shift[day_of_week]["duration"])
 
             return time_from, time_to
 
@@ -204,9 +200,7 @@ def query_continued_downtime(time_from, time_to):
         .join(models.Mesin)
         .join(continued_downtime_start, models.ContinuedDowntimeMesin.start_time)
         .join(continued_downtime_stop, models.ContinuedDowntimeMesin.stop_time)
-        .join(
-            models.Operator, models.Operator.id == continued_downtime_start.operator_id
-        )
+        .join(models.Operator, models.Operator.id == continued_downtime_start.operator_id)
         .join(models.Tooling, models.Tooling.id == continued_downtime_start.tooling_id)
         .with_entities(
             models.Mesin.name.label("MC"),
@@ -293,9 +287,7 @@ def query_utility(time_from, time_to):
     return df[col_order]
 
 
-def get_mesin_report(
-    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None
-):
+def get_mesin_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
     date_from, shift_from, date_to, shift_to = _fill_default_datetime(
         date_time_from, shift_from, date_time_to, shift_to
     )
@@ -502,9 +494,7 @@ def query_utility_operator(time_from, time_to):
     return df
 
 
-def get_operator_report(
-    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None
-):
+def get_operator_report(date_time_from=None, shift_from=None, date_time_to=None, shift_to=None):
     date_from, shift_from, date_to, shift_to = _fill_default_datetime(
         date_time_from, shift_from, date_time_to, shift_to
     )
@@ -565,9 +555,7 @@ def get_operator_report(
         if (
             (df.loc[index]["Operator"] == df.loc[index - 1]["Operator"])
             and (df.loc[index]["Start"] != df.loc[index - 1]["Stop"])
-            and (
-                df.loc[index]["Desc"][:2] != "NP" and df.loc[index]["Desc"][:2] != "BT"
-            )
+            and (df.loc[index]["Desc"][:2] != "NP" and df.loc[index]["Desc"][:2] != "BT")
         ):
             insert_row = {
                 "Operator": df.loc[index]["Operator"],

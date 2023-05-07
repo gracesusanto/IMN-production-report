@@ -113,11 +113,7 @@ def get_mesin_status(session=Sessioner):
 
 @app.get("/tooling/{tooling_id}", response_model=schema.Tooling)
 def get_tooling(tooling_id: str, session=Sessioner):
-    tooling = (
-        session.query(models.Tooling)
-        .filter(models.Tooling.id == tooling_id)
-        .one_or_none()
-    )
+    tooling = session.query(models.Tooling).filter(models.Tooling.id == tooling_id).one_or_none()
     if tooling is None:
         raise fastapi.HTTPException(404, f"No Tooling with id {tooling_id} found.")
     return tooling
@@ -125,9 +121,7 @@ def get_tooling(tooling_id: str, session=Sessioner):
 
 @app.get("/mesin/{mesin_id}", response_model=schema.Mesin)
 def get_mesin(mesin_id: str, session=Sessioner):
-    mesin = (
-        session.query(models.Mesin).filter(models.Mesin.id == mesin_id).one_or_none()
-    )
+    mesin = session.query(models.Mesin).filter(models.Mesin.id == mesin_id).one_or_none()
     if mesin is None:
         raise fastapi.HTTPException(404, f"No Machine with id {mesin_id} found.")
     return mesin
@@ -136,9 +130,7 @@ def get_mesin(mesin_id: str, session=Sessioner):
 @app.get("/operator/{operator_id}", response_model=schema.Operator)
 def get_operator(operator_id: str, session=Sessioner):
     operator = (
-        session.query(models.Operator)
-        .filter(models.Operator.id == operator_id)
-        .one_or_none()
+        session.query(models.Operator).filter(models.Operator.id == operator_id).one_or_none()
     )
     if operator is None:
         raise fastapi.HTTPException(404, f"No Operator with id {operator_id} found.")
@@ -170,15 +162,10 @@ def check_operator_status(request: schema.CheckOperatorStatus, session=Sessioner
 @app.post("/activity")
 def post_activity(activity: schema.Activity, session=Sessioner):
     if (
-        session.query(models.Mesin).filter(models.Mesin.id == activity.mesin_id).first()
+        session.query(models.Mesin).filter(models.Mesin.id == activity.mesin_id).first() is None
+        or session.query(models.Tooling).filter(models.Tooling.id == activity.tooling_id).first()
         is None
-        or session.query(models.Tooling)
-        .filter(models.Tooling.id == activity.tooling_id)
-        .first()
-        is None
-        or session.query(models.Operator)
-        .filter(models.Operator.id == activity.operator_id)
-        .first()
+        or session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first()
         is None
     ):
         raise fastapi.HTTPException(404, "Invalid input")
@@ -229,9 +216,7 @@ def post_activity(activity: schema.Activity, session=Sessioner):
 def get_mesin_status(mesin_id: str, session=Sessioner):
     status = models.Status.IDLE
     mesin_status = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.id == mesin_id)
-        .one_or_none()
+        session.query(models.MesinStatus).filter(models.MesinStatus.id == mesin_id).one_or_none()
     )
     if mesin_status is not None:
         status = mesin_status.status
