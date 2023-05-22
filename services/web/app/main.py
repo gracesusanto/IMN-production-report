@@ -24,7 +24,7 @@ app.add_middleware(DBSessionMiddleware, db_url=os.environ["DATABASE_URL"])
 
 @app.post("/db-ingestion")
 def import_to_db():
-    db_ingestion.import_to_db("data_all.csv")
+    db_ingestion.import_to_db("data/db/data_all.csv")
     return True
 
 
