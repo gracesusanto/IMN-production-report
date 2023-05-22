@@ -349,7 +349,8 @@ def get_report(
             shift_from=shift_from,
             date_to=date_to,
             shift_to=shift_to,
-        )
+        ),
+        sep=";",
     )
     return df, _get_csv_filename(
         report_category.value,
