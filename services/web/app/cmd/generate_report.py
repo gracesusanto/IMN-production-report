@@ -273,7 +273,6 @@ def get_report(
     )
 
     df = query_activity_mesin(time_from, time_to)
-    print(df)
 
     df["Tanggal"] = (
         pandas.to_datetime(df.Start, utc=True)
@@ -426,7 +425,7 @@ def get_report(
         sep=";",
     )
 
-    return df_imn, _get_csv_filename(
+    return df_limax, _get_csv_filename(
         report_category.value,
         date_from=date_from,
         shift_from=shift_from,
