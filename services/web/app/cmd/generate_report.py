@@ -278,7 +278,7 @@ def get_report(
     df["Tanggal"] = (
         pandas.to_datetime(df.Start, utc=True)
         .map(lambda x: x.tz_convert("Asia/Jakarta"))
-        .dt.strftime("%m/%d/%Y")
+        .dt.strftime("%d/%m/%Y")
     )
     df["StartTime"] = (
         pandas.to_datetime(df.Start, utc=True)
