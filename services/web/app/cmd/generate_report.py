@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, time, timedelta
 from enum import Enum
+import csv
 
 import pandas
 import sqlalchemy as sa
@@ -411,7 +412,8 @@ def get_report(
     for col in df_limax.columns:
         if col not in limax_col:
             df_limax.drop(columns=col, inplace=True)
-    df_limax = df_limax[limax_col]
+
+    df_limax = df_limax[limax_col].astype(str)
 
     df_limax.to_csv(
         _get_csv_folder(
@@ -423,6 +425,10 @@ def get_report(
             shift_to=shift_to,
         ),
         sep=";",
+        index=False,
+        quotechar="'",
+        header=None,
+        quoting=csv.QUOTE_NONNUMERIC,
     )
 
     return df_limax, _get_csv_filename(

@@ -1,5 +1,6 @@
 import os
 import io
+import csv
 
 import fastapi
 import uvicorn
@@ -44,8 +45,17 @@ def get_report(request: schema.ReportRequest):
         date_time_to=request.date_to,
         shift_to=request.shift_to,
     )
+
+    stream = io.StringIO()
+    df.to_csv(
+        stream,
+        index=False,
+        sep=";",
+        quotechar="'",
+        quoting=csv.QUOTE_NONNUMERIC,
+    )
     response = fastapi.responses.StreamingResponse(
-        io.StringIO(df.to_csv(index=False)), media_type="text/csv"
+        iter([stream.getvalue()]), media_type="text/csv"
     )
 
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
@@ -60,8 +70,16 @@ def get_report(request: schema.ReportRequest):
         date_time_to=request.date_to,
         shift_to=request.shift_to,
     )
+    stream = io.StringIO()
+    df.to_csv(
+        stream,
+        index=False,
+        sep=";",
+        quotechar="'",
+        quoting=csv.QUOTE_NONNUMERIC,
+    )
     response = fastapi.responses.StreamingResponse(
-        io.StringIO(df.to_csv(index=False)), media_type="text/csv"
+        iter([stream.getvalue()]), media_type="text/csv"
     )
 
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
@@ -285,4 +303,4 @@ def get_stop(session=Sessioner):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="192.168.0.218", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
