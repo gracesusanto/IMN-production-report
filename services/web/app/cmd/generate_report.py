@@ -82,9 +82,9 @@ def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
         return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}.csv"
 
 
-def _get_csv_folder(type, date_from, shift_from, date_to, shift_to):
+def _get_csv_folder(format, type, date_from, shift_from, date_to, shift_to):
     filename = _get_csv_filename(type, date_from, shift_from, date_to, shift_to)
-    directory = f"data/report/{type}"
+    directory = f"data/report/{format}/{type}"
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -184,6 +184,22 @@ def _generate_keterangan(row):
     return keterangan
 
 
+def _generate_keterangan_limax(row):
+    keterangan = (f"Reject: {row['Reject']}, " if row["Reject"] else "") + (
+        f"Rework: {row['Rework']}, " if row["Rework"] else ""
+    )
+
+    keterangan += _generate_keterangan(row)
+
+    if keterangan[-2::] == ", ":
+        keterangan = keterangan[:-2]
+    return keterangan
+
+
+def _format_time_for_limax(time):
+    return datetime.strptime(time, "%H:%M:%S").strftime("%H%M")
+
+
 engine = database.get_engine()
 session = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
@@ -202,6 +218,7 @@ def query_activity_mesin(time_from, time_to):
         .with_entities(
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
+            models.Operator.nik.label("NIK"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
             activity_start.timestamp.label("Start"),
@@ -225,6 +242,9 @@ def query_activity_mesin(time_from, time_to):
     df["Lot No"] = df["Lot No"].fillna("").replace("-", "")
     df["Pack No"] = df["Pack No"].fillna("").replace("-", "")
     df["Keterangan"] = df.apply(lambda row: _generate_keterangan(row), axis=1)
+    df["Keterangan Limax"] = df.apply(
+        lambda row: _generate_keterangan_limax(row), axis=1
+    )
     df.drop(["Coil No", "Lot No", "Pack No"], axis=1)
     return df
 
@@ -311,19 +331,26 @@ def get_report(
     df["Duration"] = df["Duration"].dt.total_seconds()
     df["Duration"] = df["Duration"].apply(lambda x: _convert_seconds(x))
 
-    sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
-    sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
-
-    df = df.sort_values(by=[sort_by_first, "Start"]).reset_index(drop=True)
-
     df = df.fillna(0)
     df["Qty"] = df["Qty"].astype(int)
     df["Reject"] = df["Reject"].astype(int)
     df["Rework"] = df["Rework"].astype(int)
 
+    df["Plant"] = df["MC"].apply(lambda MC: MC[-1])
+    df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
+    df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
+    df["Kode Keterangan"] = df["Desc"].apply(lambda Desc: Desc[0:2].strip())
+
+    sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
+    sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
+
+    df = df.sort_values(by=[sort_by_first, "Start"]).reset_index(drop=True)
+
     df.drop(["Start", "Stop"], axis=1, inplace=True)
 
-    header = [
+    # imn report
+    df_imn = df.copy(deep=True)
+    imn_header = [
         sort_by_first,
         "Shift",
         "Tanggal",
@@ -339,12 +366,12 @@ def get_report(
         "Duration",
         "Keterangan",
     ]
-    df = df[header]
-    print(df)
+    df_imn = df_imn[imn_header]
 
-    df.to_csv(
+    df_imn.to_csv(
         _get_csv_folder(
-            report_category.value,
+            format="imn",
+            type=report_category.value,
             date_from=date_from,
             shift_from=shift_from,
             date_to=date_to,
@@ -352,7 +379,54 @@ def get_report(
         ),
         sep=";",
     )
-    return df, _get_csv_filename(
+
+    # limax report
+    df_limax = df.copy(deep=True)
+    limax_header = {
+        "Tanggal": "STR_DATE",
+        "Plant": "STR_PLNT",
+        "Kode Tooling": "TLG_CODE",
+        "Qty": "STR_KUAN",
+        "NIK": "PEG_CODE",
+        "Shift": "SHF_CODE",
+        "MC": "MSN_CODE",
+        "Awal": "STR_AWAL",
+        "Akhir": "STR_AKHR",
+        "Kode Keterangan": "DWN_CODE",
+        "Keterangan Limax": "STR_DESC",
+    }
+    df_limax.rename(columns=limax_header, inplace=True)
+    limax_col = [
+        "STR_DATE",
+        "STR_PLNT",
+        "TLG_CODE",
+        "STR_KUAN",
+        "PEG_CODE",
+        "SHF_CODE",
+        "MSN_CODE",
+        "STR_AWAL",
+        "STR_AKHR",
+        "DWN_CODE",
+        "STR_DESC",
+    ]
+    for col in df_limax.columns:
+        if col not in limax_col:
+            df_limax.drop(columns=col, inplace=True)
+    df_limax = df_limax[limax_col]
+
+    df_limax.to_csv(
+        _get_csv_folder(
+            format="limax",
+            type=report_category.value,
+            date_from=date_from,
+            shift_from=shift_from,
+            date_to=date_to,
+            shift_to=shift_to,
+        ),
+        sep=";",
+    )
+
+    return df_imn, _get_csv_filename(
         report_category.value,
         date_from=date_from,
         shift_from=shift_from,
@@ -362,7 +436,10 @@ def get_report(
 
 
 def get_mesin_report(
-    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None
+    date_time_from: datetime = None,
+    shift_from: int = None,
+    date_time_to: datetime = None,
+    shift_to: int = None,
 ):
     return get_report(
         ReportCategory.MESIN, date_time_from, shift_from, date_time_to, shift_to
@@ -370,7 +447,10 @@ def get_mesin_report(
 
 
 def get_operator_report(
-    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None
+    date_time_from: datetime = None,
+    shift_from: int = None,
+    date_time_to: datetime = None,
+    shift_to: int = None,
 ):
     return get_report(
         ReportCategory.OPERATOR, date_time_from, shift_from, date_time_to, shift_to
@@ -378,5 +458,5 @@ def get_operator_report(
 
 
 if __name__ == "__main__":
-    get_mesin_report()
-    get_operator_report()
+    get_mesin_report(date_time_from=datetime(2023, 6, 14, 0, 0, 0))
+    get_operator_report(date_time_from=datetime(2023, 6, 14, 0, 0, 0))
