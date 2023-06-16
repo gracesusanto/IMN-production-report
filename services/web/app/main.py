@@ -40,6 +40,7 @@ def get_all_ids():
 @app.post("/report/mesin")
 def get_report(request: schema.ReportRequest):
     df, filename = generate_report.get_mesin_report(
+        format=request.format,
         date_time_from=request.date_from,
         shift_from=request.shift_from,
         date_time_to=request.date_to,
@@ -55,16 +56,18 @@ def get_report(request: schema.ReportRequest):
         quoting=csv.QUOTE_NONNUMERIC,
     )
     response = fastapi.responses.StreamingResponse(
-        iter([stream.getvalue()]), media_type="text/csv"
+        iter([stream.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
 
 
 @app.post("/report/operator")
 def get_report(request: schema.ReportRequest):
     df, filename = generate_report.get_operator_report(
+        format=request.format,
         date_time_from=request.date_from,
         shift_from=request.shift_from,
         date_time_to=request.date_to,
@@ -79,10 +82,11 @@ def get_report(request: schema.ReportRequest):
         quoting=csv.QUOTE_NONNUMERIC,
     )
     response = fastapi.responses.StreamingResponse(
-        iter([stream.getvalue()]), media_type="text/csv"
+        iter([stream.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
 
 

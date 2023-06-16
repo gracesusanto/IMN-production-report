@@ -10,6 +10,7 @@ import pytz
 
 import app.database as database
 import app.model.models as models
+import app.schema as schema
 
 """
 All timezone-aware dates and times are stored internally in UTC. 
@@ -257,6 +258,7 @@ class ReportCategory(Enum):
 
 def get_report(
     report_category: ReportCategory,
+    format: schema.FormatType = schema.FormatType.LIMAX,
     date_time_from=None,
     shift_from=None,
     date_time_to=None,
@@ -431,7 +433,7 @@ def get_report(
         quoting=csv.QUOTE_NONNUMERIC,
     )
 
-    return df_limax, _get_csv_filename(
+    filename = _get_csv_filename(
         report_category.value,
         date_from=date_from,
         shift_from=shift_from,
@@ -439,26 +441,38 @@ def get_report(
         shift_to=shift_to,
     )
 
+    if format == schema.FormatType.LIMAX:
+        return df_limax, filename
+    else:
+        return df_imn, filename
+
 
 def get_mesin_report(
+    format: schema.FormatType,
     date_time_from: datetime = None,
     shift_from: int = None,
     date_time_to: datetime = None,
     shift_to: int = None,
 ):
     return get_report(
-        ReportCategory.MESIN, date_time_from, shift_from, date_time_to, shift_to
+        ReportCategory.MESIN, format, date_time_from, shift_from, date_time_to, shift_to
     )
 
 
 def get_operator_report(
+    format: schema.FormatType,
     date_time_from: datetime = None,
     shift_from: int = None,
     date_time_to: datetime = None,
     shift_to: int = None,
 ):
     return get_report(
-        ReportCategory.OPERATOR, date_time_from, shift_from, date_time_to, shift_to
+        ReportCategory.OPERATOR,
+        format,
+        date_time_from,
+        shift_from,
+        date_time_to,
+        shift_to,
     )
 
 
