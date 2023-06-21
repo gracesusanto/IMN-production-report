@@ -195,7 +195,7 @@ def _generate_keterangan_limax(row):
 
     if keterangan[-2::] == ", ":
         keterangan = keterangan[:-2]
-    return keterangan
+    return f"'{keterangan}'"
 
 
 def _format_time_for_limax(time):
