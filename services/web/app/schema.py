@@ -27,8 +27,8 @@ class ActivityType(str, Enum):
 
 
 class FormatType(str, Enum):
-    IMN = "imn"
     LIMAX = "limax"
+    IMN = "imn"
 
 
 class Activity(BaseModel):
