@@ -52,8 +52,6 @@ def get_report(request: schema.ReportRequest):
         stream,
         index=False,
         sep=";",
-        quotechar="'",
-        quoting=csv.QUOTE_NONNUMERIC,
     )
     response = fastapi.responses.StreamingResponse(
         iter([stream.getvalue()]),
