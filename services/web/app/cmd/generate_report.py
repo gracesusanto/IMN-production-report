@@ -195,7 +195,7 @@ def _generate_keterangan_limax(row):
 
     if keterangan[-2::] == ", ":
         keterangan = keterangan[:-2]
-    return f"\"{keterangan}\""
+    return f'"{keterangan}"'
 
 
 def _format_time_for_limax(time):
@@ -306,6 +306,7 @@ def get_report(
     df["Shift"] = df["Start"].apply(lambda x: _calculate_shift(x))
 
     if report_category == ReportCategory.OPERATOR:
+        df = df.sort_values(by=["Operator", "Start"])
         for index, _ in df.iterrows():
             if index == 0:
                 continue
@@ -326,6 +327,12 @@ def get_report(
                     "Desc": "NK : Not Known",
                 }
                 df = pandas.concat([df, pandas.DataFrame([insert_row])])
+
+            if (df.loc[index]["Operator"] == df.loc[index - 1]["Operator"]) and (
+                df.loc[index]["Start"] != df.loc[index - 1]["Stop"]
+            ):
+                df.loc[index - 1]["Stop"] = df.loc[index]["Start"]
+
         df.drop(df.loc[df["Desc"] == "NP : No Plan"].index, inplace=True)
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
 
