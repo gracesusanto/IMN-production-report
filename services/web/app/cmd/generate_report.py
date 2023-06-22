@@ -36,7 +36,7 @@ def _is_time_between(begin_time, end_time, check_time=None):
 
 def _calculate_shift(row):
     date_time = datetime.strptime(row, "%m/%d/%Y %H:%M:%S")
-    return f"'{_calculate_shift_from_datetime(date_time)}'"
+    return f"'{_calculate_shift_from_datetime(date_time)}"
 
 
 def _calculate_shift_from_datetime(date_time):
@@ -195,11 +195,11 @@ def _generate_keterangan_limax(row):
 
     if keterangan[-2::] == ", ":
         keterangan = keterangan[:-2]
-    return f"'{keterangan}'"
+    return f"'{keterangan}"
 
 
 def _format_time_for_limax(time):
-    return datetime.strptime(time, "%H:%M:%S").strftime("'%H%M'")
+    return datetime.strptime(time, "%H:%M:%S").strftime("'%H%M")
 
 
 engine = database.get_engine()
