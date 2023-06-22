@@ -338,7 +338,7 @@ def get_report(
     df["Reject"] = df["Reject"].astype(int)
     df["Rework"] = df["Rework"].astype(int)
 
-    df["Plant"] = df["MC"].apply(lambda MC: f"'MC[-1]")
+    df["Plant"] = df["MC"].apply(lambda MC: f"'{MC[-1]}")
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
     df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
     df["Kode Keterangan"] = df["Desc"].apply(lambda Desc: Desc[0:2].strip())
