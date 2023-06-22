@@ -63,7 +63,7 @@ def check_mesin(mesin_id, operator_id, session):
     if mesin_status is None :
         return True, ""
     
-    if mesin_status.displayed_status == models.DisplayedStatus.IDLE:
+    if mesin_status.displayed_status != models.DisplayedStatus.RUNNING:
         return True, ""
     
     if (mesin_status.last_operator_id == operator_id):
