@@ -48,15 +48,14 @@ def get_report(request: schema.ReportRequest):
     )
 
     stream = io.StringIO()
-    # df.to_csv(
-    #     stream,
-    #     index=False,
-    #     sep=";",
-    # )
-    df.to_excel(stream)
+    df.to_csv(
+        stream,
+        index=False,
+        sep=";",
+    )
     response = fastapi.responses.StreamingResponse(
         iter([stream.getvalue()]),
-        media_type="application/vnd.ms-excel",
+        media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
@@ -73,15 +72,14 @@ def get_report(request: schema.ReportRequest):
         shift_to=request.shift_to,
     )
     stream = io.StringIO()
-    # df.to_csv(
-    #     stream,
-    #     index=False,
-    #     sep=";",
-    # )
-    df.to_excel(stream)
+    df.to_csv(
+        stream,
+        index=False,
+        sep=";",
+    )
     response = fastapi.responses.StreamingResponse(
         iter([stream.getvalue()]),
-        media_type="application/vnd.ms-excel",
+        media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 

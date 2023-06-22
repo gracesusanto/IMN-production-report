@@ -38,7 +38,7 @@ def check_operator(tooling_id, mesin_id, operator_id, session):
         session.commit()
         return True, ""
     
-    if operator_status.status == models.DisplayedStatus.IDLE:
+    if operator_status.status != models.DisplayedStatus.RUNNING:
         return True, ""
     else:
         if (operator_status.last_tooling_id == tooling_id 
