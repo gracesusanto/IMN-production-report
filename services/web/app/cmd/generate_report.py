@@ -307,6 +307,7 @@ def get_report(
 
     if report_category == ReportCategory.OPERATOR:
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
+        df = df[df["MC"].notna()]
         for index, _ in df.iterrows():
             if index == 0:
                 continue
