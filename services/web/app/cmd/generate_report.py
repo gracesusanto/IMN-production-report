@@ -287,11 +287,6 @@ def get_report(
         .map(lambda x: x.tz_convert("Asia/Jakarta"))
         .dt.strftime("%H:%M:%S")
     )
-    df["StopTime"] = (
-        pandas.to_datetime(df.Stop, utc=True)
-        .map(lambda x: x.tz_convert("Asia/Jakarta"))
-        .dt.strftime("%H:%M:%S")
-    )
 
     df["Start"] = (
         pandas.to_datetime(df.Start, utc=True)
@@ -339,6 +334,8 @@ def get_report(
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
 
     df = df[df["MC"].notna()]
+
+    df["StopTime"] = pandas.to_datetime(df.Stop).dt.strftime("%H:%M:%S")
 
     df["Duration"] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
     df["Duration"] = df["Duration"].dt.total_seconds()
