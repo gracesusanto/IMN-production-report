@@ -307,7 +307,6 @@ def get_report(
 
     if report_category == ReportCategory.OPERATOR:
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
-        df = df[df["MC"].notna()]
         for index, _ in df.iterrows():
             if index == 0:
                 continue
@@ -338,6 +337,8 @@ def get_report(
 
         df.drop(df.loc[df["Desc"] == "NP : No Plan"].index, inplace=True)
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
+
+    df = df[df["MC"].notna()]
 
     df["Duration"] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
     df["Duration"] = df["Duration"].dt.total_seconds()
