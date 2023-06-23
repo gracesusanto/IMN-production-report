@@ -306,7 +306,7 @@ def get_report(
     df["Shift"] = df["Start"].apply(lambda x: _calculate_shift(x))
 
     if report_category == ReportCategory.OPERATOR:
-        df = df.sort_values(by=["Operator", "Start"])
+        df = df.sort_values(by=["Operator", "Start"]).reset_index()
         for index, _ in df.iterrows():
             if index == 0:
                 continue
