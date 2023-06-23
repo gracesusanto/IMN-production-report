@@ -332,6 +332,7 @@ def get_report(
                 df.loc[index]["Start"] != df.loc[index - 1]["Stop"]
             ):
                 df.loc[index - 1]["Stop"] = df.loc[index]["Start"]
+                print(f"Modifying {index} {df.loc[index - 1]['Stop']}")
 
         df.drop(df.loc[df["Desc"] == "NP : No Plan"].index, inplace=True)
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
