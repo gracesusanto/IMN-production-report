@@ -331,7 +331,8 @@ def get_report(
             if (df.loc[index]["Operator"] == df.loc[index - 1]["Operator"]) and (
                 df.loc[index]["Start"] != df.loc[index - 1]["Stop"]
             ):
-                df.loc[index - 1]["Stop"] = df.loc[index]["Start"]
+                print(df)
+                df.loc[index - 1, "Stop"] = df.loc[index]["Start"]
                 print(f"Modifying {index} {df.loc[index - 1]['Stop']}")
 
         df.drop(df.loc[df["Desc"] == "NP : No Plan"].index, inplace=True)
