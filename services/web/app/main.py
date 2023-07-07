@@ -52,6 +52,7 @@ def get_report(request: schema.ReportRequest):
         stream,
         index=False,
         sep=";",
+        headers=(request.format == schema.FormatType.IMN),
     )
     response = fastapi.responses.StreamingResponse(
         iter([stream.getvalue()]),
@@ -76,6 +77,7 @@ def get_report(request: schema.ReportRequest):
         stream,
         index=False,
         sep=";",
+        headers=(request.format == schema.FormatType.IMN),
     )
     response = fastapi.responses.StreamingResponse(
         iter([stream.getvalue()]),

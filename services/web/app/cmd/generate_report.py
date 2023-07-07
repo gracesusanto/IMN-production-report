@@ -36,7 +36,7 @@ def _is_time_between(begin_time, end_time, check_time=None):
 
 def _calculate_shift(row):
     date_time = datetime.strptime(row, "%m/%d/%Y %H:%M:%S")
-    return f"'{_calculate_shift_from_datetime(date_time)}"
+    return _calculate_shift_from_datetime(date_time)
 
 
 def _calculate_shift_from_datetime(date_time):
@@ -195,7 +195,7 @@ def _generate_keterangan_limax(row):
 
     if keterangan[-2::] == ", ":
         keterangan = keterangan[:-2]
-    return f'"{keterangan}"'
+    return keterangan
 
 
 def _format_time_for_limax(time):
@@ -346,7 +346,7 @@ def get_report(
     df["Reject"] = df["Reject"].astype(int)
     df["Rework"] = df["Rework"].astype(int)
 
-    df["Plant"] = df["MC"].apply(lambda MC: f"'{MC[-1]}")
+    df["Plant"] = df["MC"].apply(lambda MC: MC[-1])
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
     df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
     df["Kode Keterangan"] = df["Desc"].apply(lambda Desc: Desc[0:2].strip())
