@@ -199,7 +199,7 @@ def _generate_keterangan_limax(row):
 
 
 def _format_time_for_limax(time):
-    return datetime.strptime(time, "%H:%M:%S").strftime("'%H%M")
+    return datetime.strptime(time, "%H:%M:%S").strftime("%H%M")
 
 
 engine = database.get_engine()
