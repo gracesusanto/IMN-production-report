@@ -1,12 +1,12 @@
 import os
 import io
-import csv
 
 import fastapi
+from fastapi import UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
-from fastapi_sqlalchemy import DBSessionMiddleware, db
-
+from fastapi_sqlalchemy import DBSessionMiddleware
 
 import app.service.business_logic as business_logic
 import app.model.models as models
@@ -21,6 +21,14 @@ load_dotenv(".env")
 app = fastapi.FastAPI()
 
 app.add_middleware(DBSessionMiddleware, db_url=os.environ["DATABASE_URL"])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 
 @app.post("/db-ingestion")
@@ -248,19 +256,19 @@ def get_mesin_status(mesin_id: str, session=Sessioner):
 # ----- GET APIs ----- #
 @app.get("/tooling/")
 def get_tooling(session=Sessioner):
-    toolings = session.query(models.Tooling).all()
+    toolings = session.query(models.Tooling).order_by(models.Tooling.id).all()
     return toolings
 
 
 @app.get("/mesin/")
 def get_mesin(session=Sessioner):
-    mesin = session.query(models.Mesin).all()
+    mesin = session.query(models.Mesin).order_by(models.Mesin.id).all()
     return mesin
 
 
 @app.get("/operator/")
 def get_operator(session=Sessioner):
-    operators = session.query(models.Operator).all()
+    operators = session.query(models.Operator).order_by(models.Operator.id).all()
     return operators
 
 
@@ -302,6 +310,84 @@ def get_start(session=Sessioner):
 def get_stop(session=Sessioner):
     stop = session.query(models.Stop).all()
     return stop
+
+
+@app.post("/operator/", response_model=schema.Operator)
+def create_operator(operator_data: schema.OperatorCreate, session=Sessioner):
+    operator = business_logic.insert_or_update_operator(
+        operator_data.name, operator_data.nik, session
+    )
+
+    try:
+        session.commit()
+        return operator
+    except Exception as e:
+        session.rollback()
+        raise fastapi.HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/mesin/", response_model=schema.Mesin)
+def create_mesin(mesin_data: schema.MesinCreate, session=Sessioner):
+    mesin = business_logic.insert_or_update_mesin(
+        mesin_data.name, mesin_data.tonase, session
+    )
+    try:
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise fastapi.HTTPException(status_code=400, detail=str(e))
+    return mesin
+
+
+@app.post("/tooling/", response_model=schema.Tooling)
+def create_tooling(tooling_data: schema.ToolingCreate, session=Sessioner):
+    tooling = business_logic.insert_or_update_tooling(tooling_data, session)
+    print(tooling.id)
+
+    try:
+        session.commit()
+        return tooling
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/operator/upload_csv")
+async def upload_operator_csv(file: UploadFile = File(...), session=Sessioner):
+    if file.content_type != "text/csv":
+        raise HTTPException(status_code=400, detail="Invalid file format")
+    content = await file.read()
+    try:
+        business_logic.process_csv(
+            content, business_logic.process_operator_row, session
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing CSV: {e}")
+    return {"detail": "Operators updated successfully"}
+
+
+@app.post("/mesin/upload_csv")
+async def upload_mesin_csv(file: UploadFile = File(...), session=Sessioner):
+    if file.content_type != "text/csv":
+        raise HTTPException(status_code=400, detail="Invalid file format")
+    content = await file.read()
+    try:
+        business_logic.process_csv(content, business_logic.process_mesin_row, session)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing CSV: {e}")
+    return {"detail": "Mesin updated successfully"}
+
+
+@app.post("/tooling/upload_csv")
+async def upload_tooling_csv(file: UploadFile = File(...), session=Sessioner):
+    if file.content_type != "text/csv":
+        raise HTTPException(status_code=400, detail="Invalid file format")
+    content = await file.read()
+    try:
+        business_logic.process_csv(content, business_logic.process_tooling_row, session)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing CSV: {e}")
+    return {"detail": "Tooling updated successfully"}
 
 
 if __name__ == "__main__":

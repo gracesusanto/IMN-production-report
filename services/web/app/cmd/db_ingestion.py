@@ -15,6 +15,7 @@ def tooling_not_null(i, offset):
 
 
 def get_tooling_id(i, offset):
+    # TL-{common tooling name}-{kode tooling}
     return f"TL-{i[7 + offset]}-{i[6 + offset]}".replace(" ", "-").replace("/", "-OF-")
 
 
