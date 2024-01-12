@@ -390,5 +390,44 @@ async def upload_tooling_csv(file: UploadFile = File(...), session=Sessioner):
     return {"detail": "Tooling updated successfully"}
 
 
+@app.delete("/tooling/{tooling_id}", status_code=204)
+async def delete_tooling(tooling_id: str, session=Sessioner):
+    business_logic.delete_item(models.Tooling, tooling_id, session)
+    return fastapi.Response(status_code=204)
+
+
+@app.delete("/mesin/{mesin_id}", status_code=204)
+async def delete_mesin(mesin_id: str, session=Sessioner):
+    business_logic.delete_item(models.Mesin, mesin_id, session)
+    return fastapi.Response(status_code=204)
+
+
+@app.delete("/operator/{operator_id}", status_code=204)
+async def delete_operator(operator_id: str, session=Sessioner):
+    business_logic.delete_item(models.Operator, operator_id, session)
+    return fastapi.Response(status_code=204)
+
+
+@app.delete("/tooling/{tooling_id}", status_code=204)
+async def delete_tooling(tooling_id: str, session=Sessioner):
+    try:
+        # Logic to delete tooling from database
+        tooling = (
+            session.query(models.Tooling)
+            .filter(models.Tooling.id == tooling_id)
+            .first()
+        )
+        if tooling is None:
+            raise HTTPException(status_code=404, detail="Tooling not found")
+
+        session.delete(tooling)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting tooling: {e}")
+
+    return fastapi.Response(status_code=204)
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

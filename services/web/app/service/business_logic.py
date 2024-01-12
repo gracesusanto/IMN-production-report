@@ -511,6 +511,21 @@ def process_csv(file_content, row_processor, session):
         raise e
 
 
+def delete_item(model, item_id: str, session):
+    item = session.query(model).filter(model.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"{model.__name__} not found")
+
+    try:
+        session.delete(item)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"Error deleting {model.__name__}: {e}"
+        )
+
+
 def _get_downtime_category(downtime_category):
     return downtime_category[:2].upper()
 
