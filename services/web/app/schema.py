@@ -19,8 +19,6 @@ Operator = sqlalchemy_to_pydantic(
 
 ALPHABET_SPACE_PERIOD = "^[A-Za-z.\s]+$"
 ALPHANUMERIC_HYPHENS = "^[A-Za-z0-9\-]+$"
-ALPHANUMERIC_HYPHENS_SPACE = "^[A-Za-z0-9\-\s]+$"
-ALPHANUMERIC_PARENTHESES_SEMICOLON = "^[A-Za-z0-9();\s]+$"
 DIGIT = "^[0-9]+$"
 DIGIT_SLASH_DIGIT = "^\d+/\d+$"
 
@@ -38,11 +36,11 @@ class MesinCreate(BaseModel):
 class ToolingCreate(BaseModel):
     customer: constr(regex=ALPHABET_SPACE_PERIOD)
     part_no: constr(regex=ALPHANUMERIC_HYPHENS)
-    child_part_name: constr(regex=ALPHANUMERIC_HYPHENS_SPACE)
-    common_tooling_name: constr(regex=ALPHANUMERIC_HYPHENS_SPACE)
+    child_part_name: str
+    common_tooling_name: str
     std_jam: constr(regex=DIGIT)
-    part_name: constr(regex=ALPHANUMERIC_PARENTHESES_SEMICOLON)
-    kode_tooling: constr(regex=ALPHANUMERIC_HYPHENS_SPACE)
+    part_name: str
+    kode_tooling: str
     proses: constr(regex=DIGIT_SLASH_DIGIT)
 
     class Config:
