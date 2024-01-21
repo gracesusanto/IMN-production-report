@@ -5,6 +5,11 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image as OpenpyxlImage
+from io import BytesIO
+import qrcode
+
 import app.model.models as models
 import app.schema as schema
 
@@ -524,6 +529,81 @@ def delete_item(model, item_id: str, session):
         raise HTTPException(
             status_code=500, detail=f"Error deleting {model.__name__}: {e}"
         )
+
+
+def generate_barcode(model, session):
+    # Query the database to get the list of items based on the model
+    if model == "operator":
+        items = session.query(models.Operator).with_entities(models.Operator.id).all()
+        filename = "barcode_operator.xlsx"
+    elif model == "mesin":
+        items = session.query(models.Mesin).with_entities(models.Mesin.id).all()
+        filename = "barcode_mesin.xlsx"
+    elif model == "tooling":
+        items = session.query(models.Tooling).with_entities(models.Tooling.id).all()
+        filename = "barcode_tooling.xlsx"
+    else:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    # Create a new Excel workbook and select the active worksheet
+    wb = Workbook()
+    ws = wb.active
+
+    # Set the desired cell width for text and QR codes
+    col_width = 15
+    for col in ["A", "B", "C", "D", "E"]:  # Set width for columns A to E
+        ws.column_dimensions[col].width = col_width
+
+    # Assuming each box of the QR code is 3 pixels
+    box_size = 3
+    qr_code_size = 100  # The size of the QR code image in pixels
+
+    # Calculate row height for QR codes
+    qr_row_height = (
+        qr_code_size * 0.75
+    )  # Excel row height is measured in points, and there are 0.75 points per pixel
+
+    # Loop through items in chunks of 5
+    for i in range(0, len(items), 5):
+        row = ((i // 5) * 2) + 1  # Calculate the starting row for each group of 5 items
+        ws.row_dimensions[row].height = 15  # Set row height for names
+        ws.row_dimensions[row + 1].height = qr_row_height  # Set row height for QR codes
+
+        # Place operator names and QR codes
+        for j in range(5):
+            if i + j < len(items):  # Check if there are enough items left
+                item_id = items[i + j][0]
+                col = chr(65 + j)  # Calculate the column letter (A to E)
+
+                # Set operator id in the first row of the group
+                ws.cell(row=row, column=j + 1, value=item_id)
+
+                # Create and insert the QR code in the second row of the group
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=box_size,  # Adjust the box_size if necessary
+                    border=1,
+                )
+                qr.add_data(item_id)
+                qr.make(fit=True)
+                img_pil = qr.make_image(fill_color="black", back_color="white")
+
+                img_byte_arr = BytesIO()
+                img_pil.save(img_byte_arr, format="PNG")
+                img_byte_arr.seek(0)
+
+                img_openpyxl = OpenpyxlImage(img_byte_arr)
+                ws.add_image(
+                    img_openpyxl, f"{col}{row + 1}"
+                )  # Place QR code in the cell below the name
+
+    # Save the workbook to a BytesIO object
+    excel_file = BytesIO()
+    wb.save(excel_file)
+    excel_file.seek(0)
+
+    return excel_file, filename
 
 
 def _get_downtime_category(downtime_category):

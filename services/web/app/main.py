@@ -8,6 +8,8 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi_sqlalchemy import DBSessionMiddleware
 
+from fastapi.responses import StreamingResponse
+
 import app.service.business_logic as business_logic
 import app.model.models as models
 import app.schema as schema
@@ -24,7 +26,10 @@ app.add_middleware(DBSessionMiddleware, db_url=os.environ["DATABASE_URL"])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Allows all origins
+    allow_origins=[
+        "http://localhost:3000",
+        "http://192.168.0.103:3000",
+    ],  # Allows all origins
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
@@ -62,7 +67,7 @@ def get_report(request: schema.ReportRequest):
         sep=";",
         lineterminator="\r\n",
     )
-    response = fastapi.responses.StreamingResponse(
+    response = StreamingResponse(
         iter([stream.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
@@ -87,7 +92,7 @@ def get_report(request: schema.ReportRequest):
         sep=";",
         lineterminator="\r\n",
     )
-    response = fastapi.responses.StreamingResponse(
+    response = StreamingResponse(
         iter([stream.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
@@ -406,6 +411,18 @@ async def delete_mesin(mesin_id: str, session=Sessioner):
 async def delete_operator(operator_id: str, session=Sessioner):
     business_logic.delete_item(models.Operator, operator_id, session)
     return fastapi.Response(status_code=204)
+
+
+@app.get("/download-barcode/{model}/")
+async def download_barcode(model: str, session=Sessioner):
+    excel_file, filename = business_logic.generate_barcode(model, session)
+
+    # Stream the Excel file directly without saving it to disk on the server
+    return StreamingResponse(
+        excel_file,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.delete("/tooling/{tooling_id}", status_code=204)
