@@ -75,13 +75,11 @@ def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
 
     if date_from == date_to:
         if shift_from == shift_to:
-            return f"result_{type}_{date_from}_shift_{shift_from}.csv"
+            return f"result_{type}_{date_from}_shift_{shift_from}"
         else:
-            return (
-                f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}.csv"
-            )
+            return f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}"
     else:
-        return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}.csv"
+        return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}"
 
 
 def _get_csv_folder(format, type, date_from, shift_from, date_to, shift_to):
@@ -446,7 +444,7 @@ def get_report(
         shift_to=shift_to,
     )
 
-    if format == schema.FormatType.LIMAX:
+    if "limax" in format.value:
         return df_limax, filename
     else:
         return df_imn, filename

@@ -8,7 +8,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi_sqlalchemy import DBSessionMiddleware
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 
 import app.service.business_logic as business_logic
 import app.model.models as models
@@ -60,21 +60,7 @@ def get_report(request: schema.ReportRequest):
         date_time_to=request.date_to,
         shift_to=request.shift_to,
     )
-
-    stream = io.StringIO()
-    df.to_csv(
-        stream,
-        index=False,
-        sep=";",
-        lineterminator="\r\n",
-    )
-    response = StreamingResponse(
-        iter([stream.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-    return response
+    return business_logic.generate_report_response(df, filename, request.format)
 
 
 @app.post("/report/operator")
@@ -86,20 +72,7 @@ def get_report(request: schema.ReportRequest):
         date_time_to=request.date_to,
         shift_to=request.shift_to,
     )
-    stream = io.StringIO()
-    df.to_csv(
-        stream,
-        index=False,
-        sep=";",
-        lineterminator="\r\n",
-    )
-    response = StreamingResponse(
-        iter([stream.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-    return response
+    return business_logic.generate_report_response(df, filename, request.format)
 
 
 @app.get("/mesin-status-all/")

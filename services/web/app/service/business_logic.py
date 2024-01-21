@@ -4,6 +4,7 @@ import csv
 from datetime import timedelta
 
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
@@ -619,6 +620,36 @@ def generate_barcode(model, session):
     excel_file.seek(0)
 
     return excel_file, filename
+
+
+def generate_report_response(df, filename, report_format):
+    if "dashboard" in report_format.value:
+        return JSONResponse(content=df.to_dict(orient="records"))
+    else:
+        if report_format == schema.FormatType.LIMAX:
+            # Prepare CSV
+            stream = io.StringIO()
+            df.to_csv(stream, index=False, sep=";", lineterminator="\r\n")
+            stream.seek(0)
+            response_content = stream.getvalue()
+            media_type = "text/csv"
+            filename += ".csv"
+        elif report_format == schema.FormatType.IMN:
+            # Prepare Excel
+            stream = io.BytesIO()
+            df.to_excel(stream, index=False)
+            stream.seek(0)
+            response_content = stream.getvalue()
+            media_type = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            filename += ".xlsx"
+
+        return StreamingResponse(
+            iter([response_content]),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
 
 def _get_downtime_category(downtime_category):
