@@ -534,13 +534,28 @@ def delete_item(model, item_id: str, session):
 def generate_barcode(model, session):
     # Query the database to get the list of items based on the model
     if model == "operator":
-        items = session.query(models.Operator).with_entities(models.Operator.id).all()
+        items = (
+            session.query(models.Operator)
+            .with_entities(models.Operator.id)
+            .order_by(models.Operator.id.asc())
+            .all()
+        )
         filename = "barcode_operator.xlsx"
     elif model == "mesin":
-        items = session.query(models.Mesin).with_entities(models.Mesin.id).all()
+        items = (
+            session.query(models.Mesin)
+            .with_entities(models.Mesin.id)
+            .order_by(models.Mesin.id.asc())
+            .all()
+        )
         filename = "barcode_mesin.xlsx"
     elif model == "tooling":
-        items = session.query(models.Tooling).with_entities(models.Tooling.id).all()
+        items = (
+            session.query(models.Tooling)
+            .with_entities(models.Tooling.id)
+            .order_by(models.Tooling.id.asc())
+            .all()
+        )
         filename = "barcode_tooling.xlsx"
     else:
         raise HTTPException(status_code=404, detail="Model not found")
