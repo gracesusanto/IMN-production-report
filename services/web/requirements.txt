@@ -4,6 +4,7 @@ fastapi-sqlalchemy >= 0.2.1
 wheel
 openpyxl
 pandas >= 1.5.3
+Pillow
 psycopg2 >= 2.9.5
 pydantic >= 1.10.4
 pydantic-sqlalchemy >= 0.0.9
