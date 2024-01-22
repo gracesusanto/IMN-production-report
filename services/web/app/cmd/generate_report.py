@@ -234,10 +234,11 @@ def query_activity_mesin(time_from, time_to):
         .filter(activity_start.timestamp >= time_from)
         .filter(activity_start.timestamp < time_to)
         .order_by(models.Mesin.name.asc(), activity_start.timestamp.asc())
-        .statement
     )
 
-    df = pandas.read_sql(sql=query, con=engine)
+    result = session.execute(query)
+    df = pandas.DataFrame(result.fetchall(), columns=result.keys())
+
     df["Coil No"] = df["Coil No"].fillna("").replace("-", "")
     df["Lot No"] = df["Lot No"].fillna("").replace("-", "")
     df["Pack No"] = df["Pack No"].fillna("").replace("-", "")
