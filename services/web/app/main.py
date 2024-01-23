@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
 from fastapi_sqlalchemy import DBSessionMiddleware
+from fastapi.responses import StreamingResponse
 
-from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy.orm import aliased
+from sqlalchemy import case, func, desc
 
 import app.service.business_logic as business_logic
 import app.model.models as models
@@ -77,32 +79,49 @@ def get_report(request: schema.ReportRequest):
 
 @app.get("/mesin-status-all/")
 def get_mesin_status(session=Sessioner):
-    mesin_status_idle = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.displayed_status == models.DisplayedStatus.IDLE)
-        .with_entities(
-            models.MesinStatus.id.label("Mesin"),
-            models.MesinStatus.last_tooling_id.label("Tooling"),
-            models.MesinStatus.displayed_status.label("Status"),
-            models.MesinStatus.category_downtime.label("Kategori Downtime"),
-        )
-        .order_by(models.MesinStatus.id.asc())
-        .all()
-    )
+    start_log_alias = aliased(models.MesinLog, name="start_log")
+    stop_log_alias = aliased(models.MesinLog, name="stop_log")
+
+    start_time = case(
+        [
+            (
+                models.MesinStatus.last_stop_id != None,
+                func.timezone("Asia/Jakarta", start_log_alias.timestamp),
+            ),
+        ],
+        else_=func.timezone("Asia/Jakarta", stop_log_alias.timestamp),
+    ).label("Start Time")
+
     mesin_status = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.displayed_status != models.DisplayedStatus.IDLE)
-        .with_entities(
+        session.query(
+            start_time.label("Start Time"),
             models.MesinStatus.id.label("Mesin"),
             models.MesinStatus.last_tooling_id.label("Tooling"),
-            models.MesinStatus.last_operator_id.label("Operator"),
+            case(
+                [
+                    (
+                        models.MesinStatus.displayed_status
+                        != models.DisplayedStatus.IDLE,
+                        models.MesinStatus.last_operator_id,
+                    ),
+                ],
+                else_=None,
+            ).label("Operator"),
             models.MesinStatus.displayed_status.label("Status"),
             models.MesinStatus.category_downtime.label("Kategori Downtime"),
         )
-        .order_by(models.MesinStatus.id.asc())
+        .outerjoin(
+            models.Operator, models.Operator.id == models.MesinStatus.last_operator_id
+        )
+        .outerjoin(
+            start_log_alias, models.MesinStatus.last_start_id == start_log_alias.id
+        )
+        .outerjoin(stop_log_alias, models.MesinStatus.last_stop_id == stop_log_alias.id)
+        .order_by(desc(start_time))
         .all()
     )
-    return {"details": mesin_status + mesin_status_idle}
+
+    return {"details": mesin_status}
 
 
 @app.get("/tooling/{tooling_id}", response_model=schema.Tooling)
