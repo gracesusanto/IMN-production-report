@@ -10,7 +10,7 @@ from fastapi_sqlalchemy import DBSessionMiddleware
 from fastapi.responses import StreamingResponse
 
 from sqlalchemy.orm import aliased
-from sqlalchemy import case, func
+from sqlalchemy import case, func, desc
 
 import app.service.business_logic as business_logic
 import app.model.models as models
@@ -81,17 +81,20 @@ def get_report(request: schema.ReportRequest):
 def get_mesin_status(session=Sessioner):
     start_log_alias = aliased(models.MesinLog, name="start_log")
     stop_log_alias = aliased(models.MesinLog, name="stop_log")
+
+    start_time = case(
+        [
+            (
+                models.MesinStatus.last_stop_id != None,
+                func.timezone("Asia/Jakarta", start_log_alias.timestamp),
+            ),
+        ],
+        else_=func.timezone("Asia/Jakarta", stop_log_alias.timestamp),
+    ).label("Start Time")
+
     mesin_status = (
         session.query(
-            case(
-                [
-                    (
-                        models.MesinStatus.last_stop_id != None,
-                        func.timezone("Asia/Jakarta", start_log_alias.timestamp),
-                    ),
-                ],
-                else_=func.timezone("Asia/Jakarta", stop_log_alias.timestamp),
-            ).label("Start Time"),
+            start_time.label("Start Time"),
             models.MesinStatus.id.label("Mesin"),
             models.MesinStatus.last_tooling_id.label("Tooling"),
             case(
@@ -114,7 +117,7 @@ def get_mesin_status(session=Sessioner):
             start_log_alias, models.MesinStatus.last_start_id == start_log_alias.id
         )
         .outerjoin(stop_log_alias, models.MesinStatus.last_stop_id == stop_log_alias.id)
-        .order_by("Start Time")
+        .order_by(desc(start_time))
         .all()
     )
 
