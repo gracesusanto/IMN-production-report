@@ -204,6 +204,15 @@ engine = database.get_engine()
 session = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 
+def _calculate_productivity(row):
+    if row["Desc"] == "U : Utility":
+        # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
+        productivity = ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
+        return f"{productivity:.2f}%"
+    else:
+        return 0
+
+
 def query_activity_mesin(time_from, time_to):
     activity_start = aliased(models.MesinLog)
     activity_stop = aliased(models.MesinLog)
@@ -221,6 +230,7 @@ def query_activity_mesin(time_from, time_to):
             models.Operator.nik.label("NIK"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
+            models.Tooling.std_jam.label("Target"),
             activity_start.timestamp.label("Start"),
             activity_stop.timestamp.label("Stop"),
             models.ActivityMesin.downtime_category.label("Desc"),
@@ -338,6 +348,7 @@ def get_report(
 
     df["Duration"] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
     df["Duration"] = df["Duration"].dt.total_seconds()
+    df["Productivity"] = df.apply(_calculate_productivity, axis=1)
     df["Duration"] = df["Duration"].apply(lambda x: _convert_seconds(x))
 
     df = df.fillna(0)
@@ -369,6 +380,8 @@ def get_report(
         "Kode Tooling",
         "Common Tooling Name",
         "Qty",
+        "Target",
+        "Productivity",
         "Reject",
         "Rework",
         "Desc",
