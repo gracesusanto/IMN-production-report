@@ -230,6 +230,8 @@ def query_activity_mesin(time_from, time_to):
             models.Operator.nik.label("NIK"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
+            models.Tooling.part_no.label("Part No"),
+            models.Tooling.part_name.label("Part Name"),
             models.Tooling.std_jam.label("Target"),
             activity_start.timestamp.label("Start"),
             activity_stop.timestamp.label("Stop"),
@@ -356,6 +358,23 @@ def get_report(
     df["Reject"] = df["Reject"].astype(int)
     df["Rework"] = df["Rework"].astype(int)
 
+    df["Reject Ratio"] = df.apply(
+        lambda row: (
+            f"{(row['Reject'] / row['Target'] * 100):.2f}%"
+            if row["Target"] > 0
+            else "0.00%"
+        ),
+        axis=1,
+    )
+    df["Rework Ratio"] = df.apply(
+        lambda row: (
+            f"{(row['Rework'] / row['Target'] * 100):.2f}%"
+            if row["Target"] > 0
+            else "0.00%"
+        ),
+        axis=1,
+    )
+
     df["Plant"] = df["MC"].apply(lambda MC: MC[-1])
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
     df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
@@ -379,13 +398,17 @@ def get_report(
         sort_by_next,
         "Kode Tooling",
         "Common Tooling Name",
+        "Part No",
+        "Part Name",
         "Qty",
         "Target",
-        "Productivity",
         "Reject",
         "Rework",
         "Desc",
         "Duration",
+        "Productivity",
+        "Reject Ratio",
+        "Rework Ratio",
         "Keterangan",
     ]
     df_imn = df_imn[imn_header]
