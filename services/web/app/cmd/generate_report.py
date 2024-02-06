@@ -205,12 +205,21 @@ session = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 
 def _calculate_productivity(row):
-    if row["Desc"] == "U : Utility":
-        # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
-        productivity = ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
-        return f"{productivity:.2f}%"
-    else:
-        return 0
+    if row["Desc"] != "U : Utility":
+        return "0.00%"
+
+    # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
+    productivity = ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
+    return f"{productivity:.2f}%"
+
+
+def _calculate_ratio(row, type):
+    # Qty is just qty of OK, not total
+    total = row["Qty"] + row["Reject"] + row["Rework"]
+    if total == 0:
+        return "0.00%"
+    ratio = row[type] / total * 100
+    return f"{ratio:.2f}%"
 
 
 def query_activity_mesin(time_from, time_to):
@@ -358,22 +367,8 @@ def get_report(
     df["Reject"] = df["Reject"].astype(int)
     df["Rework"] = df["Rework"].astype(int)
 
-    df["Reject Ratio"] = df.apply(
-        lambda row: (
-            f"{(row['Reject'] / row['Target'] * 100):.2f}%"
-            if row["Target"] > 0
-            else "0.00%"
-        ),
-        axis=1,
-    )
-    df["Rework Ratio"] = df.apply(
-        lambda row: (
-            f"{(row['Rework'] / row['Target'] * 100):.2f}%"
-            if row["Target"] > 0
-            else "0.00%"
-        ),
-        axis=1,
-    )
+    df["Reject Ratio"] = df.apply(_calculate_ratio, type="Reject", axis=1)
+    df["Rework Ratio"] = df.apply(_calculate_ratio, type="Rework", axis=1)
 
     df["Plant"] = df["MC"].apply(lambda MC: MC[-1])
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
