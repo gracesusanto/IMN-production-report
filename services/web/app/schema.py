@@ -75,8 +75,8 @@ class Activity(BaseModel):
 
 
 class FieldFilter(BaseModel):
-    lt: Optional[int] = None
-    gt: Optional[int] = None
+    lt: Optional[float] = None
+    gt: Optional[float] = None
 
 
 class Pagination(BaseModel):
