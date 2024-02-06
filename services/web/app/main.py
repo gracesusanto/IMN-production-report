@@ -61,6 +61,8 @@ def get_report(request: schema.ReportRequest):
         shift_from=request.shift_from,
         date_time_to=request.date_to,
         shift_to=request.shift_to,
+        pagination=request.pagination,
+        filters=request.filters,
     )
     return business_logic.generate_report_response(df, filename, request.format)
 
@@ -73,6 +75,8 @@ def get_report(request: schema.ReportRequest):
         shift_from=request.shift_from,
         date_time_to=request.date_to,
         shift_to=request.shift_to,
+        pagination=request.pagination,
+        filters=request.filters,
     )
     return business_logic.generate_report_response(df, filename, request.format)
 

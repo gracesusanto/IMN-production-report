@@ -206,23 +206,39 @@ session = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 def _calculate_productivity(row):
     if row["Desc"] != "U : Utility":
-        return "0.00%"
+        return 0
 
     # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
-    productivity = ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
-    return f"{productivity:.2f}%"
+    return ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
 
 
 def _calculate_ratio(row, type):
     # Qty is just qty of OK, not total
     total = row["Qty"] + row["Reject"] + row["Rework"]
     if total == 0:
-        return "0.00%"
-    ratio = row[type] / total * 100
-    return f"{ratio:.2f}%"
+        return 0
+    return row[type] / total * 100
 
 
-def query_activity_mesin(time_from, time_to):
+def _filter_df(df, filters):
+    conditions = []
+
+    for field, filter_condition in filters.items():
+        if field not in ["Productivity", "Reject Ratio", "Rework Ratio"]:
+            continue
+        if filter_condition.lt is not None:
+            conditions.append(df[field] <= filter_condition.lt)
+        if filter_condition.gt is not None:
+            conditions.append(df[field] >= filter_condition.gt)
+
+    if conditions:
+        overall_condition = pandas.concat(conditions, axis=1).all(axis=1)
+        df = df[overall_condition]
+
+    return df
+
+
+def query_activity_mesin(time_from, time_to, pagination):
     activity_start = aliased(models.MesinLog)
     activity_stop = aliased(models.MesinLog)
 
@@ -257,6 +273,11 @@ def query_activity_mesin(time_from, time_to):
         .order_by(models.Mesin.name.asc(), activity_start.timestamp.asc())
     )
 
+    if pagination is not None:
+        query = query.offset((pagination.page - 1) * pagination.page_size).limit(
+            pagination.page_size
+        )
+
     result = session.execute(query)
     df = pandas.DataFrame(result.fetchall(), columns=result.keys())
 
@@ -283,6 +304,8 @@ def get_report(
     shift_from=None,
     date_time_to=None,
     shift_to=None,
+    pagination=None,
+    filters=None,
 ):
     date_from, shift_from, date_to, shift_to = _fill_default_datetime(
         date_time_from, shift_from, date_time_to, shift_to
@@ -295,7 +318,10 @@ def get_report(
         shift_to=shift_to,
     )
 
-    df = query_activity_mesin(time_from, time_to)
+    if "limax" in format.value:
+        pagination = filters = None
+
+    df = query_activity_mesin(time_from, time_to, pagination)
 
     df["Tanggal"] = (
         pandas.to_datetime(df.Start, utc=True)
@@ -369,6 +395,14 @@ def get_report(
 
     df["Reject Ratio"] = df.apply(_calculate_ratio, type="Reject", axis=1)
     df["Rework Ratio"] = df.apply(_calculate_ratio, type="Rework", axis=1)
+
+    # Filter while Productivity and Ratios are still in the form of float
+    if filters is not None:
+        df = _filter_df(df, filters)
+
+    df["Productivity"] = df["Productivity"].map(lambda x: f"{x:.2f}%")
+    df["Reject Ratio"] = df["Reject Ratio"].map(lambda x: f"{x:.2f}%")
+    df["Rework Ratio"] = df["Rework Ratio"].map(lambda x: f"{x:.2f}%")
 
     df["Plant"] = df["MC"].apply(lambda MC: MC[-1])
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
@@ -488,9 +522,18 @@ def get_mesin_report(
     shift_from: int = None,
     date_time_to: datetime = None,
     shift_to: int = None,
+    pagination=None,
+    filters=None,
 ):
     return get_report(
-        ReportCategory.MESIN, format, date_time_from, shift_from, date_time_to, shift_to
+        ReportCategory.MESIN,
+        format,
+        date_time_from,
+        shift_from,
+        date_time_to,
+        shift_to,
+        pagination,
+        filters,
     )
 
 
@@ -500,6 +543,8 @@ def get_operator_report(
     shift_from: int = None,
     date_time_to: datetime = None,
     shift_to: int = None,
+    pagination=None,
+    filters=None,
 ):
     return get_report(
         ReportCategory.OPERATOR,
@@ -508,6 +553,8 @@ def get_operator_report(
         shift_from,
         date_time_to,
         shift_to,
+        pagination,
+        filters,
     )
 
 

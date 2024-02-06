@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Union
+from typing import Union, Optional, Dict
 from datetime import date
 
 from pydantic import BaseModel, constr
@@ -74,12 +74,24 @@ class Activity(BaseModel):
     pack_no: Union[str, None] = None
 
 
+class FieldFilter(BaseModel):
+    lt: Optional[int] = None
+    gt: Optional[int] = None
+
+
+class Pagination(BaseModel):
+    page: Optional[int] = 1
+    page_size: Optional[int] = 10
+
+
 class ReportRequest(BaseModel):
     format: FormatType
     date_from: Union[date, None] = None
     shift_from: Union[int, None] = 1
     date_to: Union[date, None] = None
     shift_to: Union[int, None] = 3
+    pagination: Union[Pagination, None] = None
+    filters: Optional[Dict[str, FieldFilter]] = None
 
 
 class CheckOperatorStatus(BaseModel):
