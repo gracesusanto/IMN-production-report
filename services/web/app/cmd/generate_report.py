@@ -306,6 +306,7 @@ def get_report(
     shift_to=None,
     pagination=None,
     filters=None,
+    sort=None,
 ):
     date_from, shift_from, date_to, shift_to = _fill_default_datetime(
         date_time_from, shift_from, date_time_to, shift_to
@@ -319,7 +320,7 @@ def get_report(
     )
 
     if "limax" in format.value:
-        pagination = filters = None
+        pagination = filters = sort = None
 
     df = query_activity_mesin(time_from, time_to, pagination)
 
@@ -396,9 +397,19 @@ def get_report(
     df["Reject Ratio"] = df.apply(_calculate_ratio, type="Reject", axis=1)
     df["Rework Ratio"] = df.apply(_calculate_ratio, type="Rework", axis=1)
 
+    sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
+    sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
+
     # Filter while Productivity and Ratios are still in the form of float
     if filters is not None:
         df = _filter_df(df, filters)
+    if sort:
+        print(sort.sort_by, sort.direction)
+        df = df.sort_values(
+            by=[sort.sort_by], ascending=(sort.direction == "ascending")
+        )
+    else:
+        df = df.sort_values(by=[sort_by_first, "Start"]).reset_index(drop=True)
 
     df["Productivity"] = df["Productivity"].map(lambda x: f"{x:.2f}%")
     df["Reject Ratio"] = df["Reject Ratio"].map(lambda x: f"{x:.2f}%")
@@ -408,11 +419,6 @@ def get_report(
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
     df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
     df["Kode Keterangan"] = df["Desc"].apply(lambda Desc: Desc[0:2].strip())
-
-    sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
-    sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
-
-    df = df.sort_values(by=[sort_by_first, "Start"]).reset_index(drop=True)
 
     df.drop(["Start", "Stop"], axis=1, inplace=True)
 
@@ -524,6 +530,7 @@ def get_mesin_report(
     shift_to: int = None,
     pagination=None,
     filters=None,
+    sort=None,
 ):
     return get_report(
         ReportCategory.MESIN,
@@ -534,6 +541,7 @@ def get_mesin_report(
         shift_to,
         pagination,
         filters,
+        sort,
     )
 
 
@@ -545,6 +553,7 @@ def get_operator_report(
     shift_to: int = None,
     pagination=None,
     filters=None,
+    sort=None,
 ):
     return get_report(
         ReportCategory.OPERATOR,
@@ -555,6 +564,7 @@ def get_operator_report(
         shift_to,
         pagination,
         filters,
+        sort,
     )
 
 
