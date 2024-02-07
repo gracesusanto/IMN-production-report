@@ -79,6 +79,13 @@ class FieldFilter(BaseModel):
     gt: Optional[float] = None
 
 
+class SortConfig(BaseModel):
+    sort_by: Optional[str] = None  # The field name to sort by
+    direction: Optional[str] = (
+        "ascending"  # The direction to sort ('ascending' or 'descending')
+    )
+
+
 class Pagination(BaseModel):
     page: Optional[int] = 1
     page_size: Optional[int] = 10
@@ -92,6 +99,7 @@ class ReportRequest(BaseModel):
     shift_to: Union[int, None] = 3
     pagination: Union[Pagination, None] = None
     filters: Optional[Dict[str, FieldFilter]] = None
+    sort: Optional[SortConfig] = None
 
 
 class CheckOperatorStatus(BaseModel):
