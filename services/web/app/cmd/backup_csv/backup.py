@@ -33,7 +33,11 @@ def load_last_backup_timestamps():
         with open(last_backup_timestamps_file, "r") as file:
             return json.load(file)
     except FileNotFoundError:
-        return {}
+        return {
+            "Mesin": "2000-01-01T00:00:00.000000",
+            "Tooling": "2000-01-01T00:00:00.000000",
+            "Operator": "2000-01-01T00:00:00.000000",
+        }
 
 
 def save_last_backup_timestamp(model, timestamp):
