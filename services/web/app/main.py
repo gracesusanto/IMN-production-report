@@ -18,6 +18,7 @@ import app.schema as schema
 from app.database import Sessioner
 import app.cmd.generate_report as generate_report
 import app.cmd.db_ingestion as db_ingestion
+import app.cmd.backup_csv.backup as backup
 import app.cmd.get_id as get_id
 
 load_dotenv(".env")
@@ -42,6 +43,18 @@ app.add_middleware(
 @app.post("/db-ingestion")
 def import_to_db():
     db_ingestion.import_to_db("data/db/data_all.csv")
+    return True
+
+
+@app.post("/db-backup")
+def backup_to_csv():
+    backup.backup_to_csv()
+    return True
+
+
+@app.post("/db-import-backup")
+def backup_from_csv():
+    backup.backup_from_csv()
     return True
 
 
@@ -204,40 +217,11 @@ def post_activity(activity: schema.Activity, session=Sessioner):
 
     match activity.type:
         case schema.ActivityType.START:
-            business_logic.start_activity(
-                tooling_id=activity.tooling_id,
-                mesin_id=activity.mesin_id,
-                operator_id=activity.operator_id,
-                reject=activity.reject,
-                rework=activity.rework,
-                session=session,
-            )
-
+            business_logic.start_activity(activity, session)
         case schema.ActivityType.FIRST_STOP:
-            business_logic.first_stop_activity(
-                tooling_id=activity.tooling_id,
-                mesin_id=activity.mesin_id,
-                operator_id=activity.operator_id,
-                output=activity.output,
-                reject=activity.reject,
-                rework=activity.rework,
-                coil_no=activity.coil_no,
-                lot_no=activity.lot_no,
-                pack_no=activity.pack_no,
-                downtime_category=activity.category_downtime,
-                session=session,
-            )
-
+            business_logic.first_stop_activity(activity, session)
         case schema.ActivityType.CONTINUE_STOP:
-            business_logic.continue_stop_activity(
-                tooling_id=activity.tooling_id,
-                mesin_id=activity.mesin_id,
-                operator_id=activity.operator_id,
-                reject=activity.reject,
-                rework=activity.rework,
-                downtime_category=activity.category_downtime,
-                session=session,
-            )
+            business_logic.continue_stop_activity(activity, session)
         case _:
             raise fastapi.HTTPException(404, "Invalid activity type")
 

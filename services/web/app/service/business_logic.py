@@ -100,7 +100,13 @@ def check_mesin(mesin_id, operator_id, session):
     return False, message
 
 
-def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
+def start_activity(activity, session):
+    tooling_id = activity.tooling_id
+    mesin_id = activity.mesin_id
+    operator_id = activity.operator_id
+    reject = activity.reject
+    rework = activity.rework
+
     # Insert to Start Table
     start_entity = models.MesinLog(
         tooling_id=tooling_id,
@@ -183,19 +189,18 @@ def start_activity(tooling_id, mesin_id, operator_id, reject, rework, session):
     session.commit()
 
 
-def first_stop_activity(
-    tooling_id,
-    mesin_id,
-    operator_id,
-    output,
-    downtime_category,
-    reject,
-    rework,
-    session,
-    coil_no="",
-    lot_no="",
-    pack_no="",
-):
+def first_stop_activity(activity, session):
+    tooling_id = activity.tooling_id
+    mesin_id = activity.mesin_id
+    operator_id = activity.operator_id
+    output = activity.output
+    reject = activity.reject
+    rework = activity.rework
+    coil_no = activity.coil_no
+    lot_no = activity.lot_no
+    pack_no = activity.pack_no
+    downtime_category = activity.category_downtime
+
     # Insert to Stop Table
     stop_entity = models.MesinLog(
         tooling_id=tooling_id,
@@ -287,9 +292,14 @@ def first_stop_activity(
     session.commit()
 
 
-def continue_stop_activity(
-    tooling_id, mesin_id, operator_id, downtime_category, reject, rework, session
-):
+def continue_stop_activity(activity, session):
+    tooling_id = activity.tooling_id
+    mesin_id = activity.mesin_id
+    operator_id = activity.operator_id
+    reject = activity.reject
+    rework = activity.rework
+    downtime_category = activity.category_downtime
+
     # Insert to Stop Table
     stop_entity = models.MesinLog(
         tooling_id=tooling_id,
