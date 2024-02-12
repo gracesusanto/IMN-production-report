@@ -104,7 +104,7 @@ def parse_datetime_or_none(value):
         # Directly parse the ISO 8601 datetime string, including timezone
         return datetime.fromisoformat(value)
     except (ValueError, TypeError):
-        return None
+        return datetime.now().isoformat()
 
 
 def insert_from_csv(model, filename):
