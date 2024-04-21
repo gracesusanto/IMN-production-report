@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Back up to csv
+curl -X POST "http://0.0.0.0:8000/db-backup"
+
 # Assuming these environment variables are passed from docker-compose to the backup service
 DB_USER="${POSTGRES_USER}"
 DB_PASSWORD="${POSTGRES_PASSWORD}"
@@ -9,10 +12,17 @@ DB_HOST="db"
 
 # Backup storage directory inside the container
 # Make sure this directory maps to a volume or bind mount for persistence
-BACKUP_DIR="./backup/backups"
+BACKUP_DIR="/app/backup/sql"
+
+ensure_folder_exists() {
+    if [ ! -d "$1" ]; then
+        mkdir -p "$1"
+    fi
+}
+ensure_folder_exists "$BACKUP_DIR"
 
 # Backup filename format
-DATE=$(date +%Y-%m-%d_%H%M%S)
+DATE=$(date +%Y-%m-%d)
 FILE_NAME="db_backup_$DATE.sql"
 
 # Perform the backup

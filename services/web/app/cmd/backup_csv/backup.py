@@ -15,7 +15,9 @@ import json
 # Create a session
 session = sessionmaker(autocommit=False, autoflush=False, bind=database.get_engine())()
 
-backup_folder = "data/db/backup"
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+backup_folder = "backup/csv"
+last_backup_timestamps_file = "app/cmd/backup_csv/last_backup_timestamps.json"
 models = [Mesin, Tooling, Operator]
 
 
@@ -23,20 +25,16 @@ def ensure_folder_exists(folder):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-
-# Filename to store the last backup timestamps
-last_backup_timestamps_file = "app/cmd/backup_csv/last_backup_timestamps.json"
-
-
 def load_last_backup_timestamps():
     try:
         with open(last_backup_timestamps_file, "r") as file:
             return json.load(file)
     except FileNotFoundError:
+        datetime_string = '2000-01-01 00:00:00'
         return {
-            "Mesin": "2000-01-01T00:00:00.000000",
-            "Tooling": "2000-01-01T00:00:00.000000",
-            "Operator": "2000-01-01T00:00:00.000000",
+            "Mesin": datetime_string,
+            "Tooling": datetime_string,
+            "Operator": datetime_string,
         }
 
 
@@ -51,11 +49,10 @@ def dump_table_to_csv(model, filename):
     last_backup_timestamps = load_last_backup_timestamps()
     model_name = model.__name__
     last_backup_timestamp = last_backup_timestamps.get(
-        model_name, datetime.min.strftime("%Y-%m-%d %H:%M:%S.%f")
+        model_name, datetime.min.strftime(DATETIME_FORMAT)
     )
     last_backup_datetime = datetime.strptime(
-        last_backup_timestamp, "%Y-%m-%d %H:%M:%S.%f"
-    )
+        last_backup_timestamp, DATETIME_FORMAT)
 
     query = session.query(model).filter(
         sa.or_(
@@ -88,7 +85,7 @@ def dump_table_to_csv(model, filename):
             ]
         )
         save_last_backup_timestamp(
-            model, latest_timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")
+            model, latest_timestamp.strftime(DATETIME_FORMAT)
         )
         print(f"Appended records to {filename} for {model_name}.")
     else:

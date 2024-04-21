@@ -3,7 +3,7 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 RUN apt-get update && \
-    apt-get -y install python3-pandas libpq-dev build-essential postgresql-client cron bash && \
+    apt-get -y install python3-pandas libpq-dev build-essential postgresql-client cron bash curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Install the repository and then install the PostgreSQL 16 client
