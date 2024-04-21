@@ -21,79 +21,23 @@ last_backup_timestamps_file = "app/cmd/backup_csv/last_backup_timestamps.json"
 models = [Mesin, Tooling, Operator]
 
 
-def ensure_folder_exists(folder):
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-def load_last_backup_timestamps():
-    try:
-        with open(last_backup_timestamps_file, "r") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        datetime_string = '2000-01-01 00:00:00'
-        return {
-            "Mesin": datetime_string,
-            "Tooling": datetime_string,
-            "Operator": datetime_string,
-        }
-
-
-def save_last_backup_timestamp(model, timestamp):
-    timestamps = load_last_backup_timestamps()
-    timestamps[model.__name__] = timestamp
-    with open(last_backup_timestamps_file, "w") as file:
-        json.dump(timestamps, file)
-
+def ensure_folder_exists():
+    if not os.path.exists(backup_folder):
+        os.makedirs(backup_folder)
 
 def dump_table_to_csv(model, filename):
-    last_backup_timestamps = load_last_backup_timestamps()
-    model_name = model.__name__
-    last_backup_timestamp = last_backup_timestamps.get(
-        model_name, datetime.min.strftime(DATETIME_FORMAT)
-    )
-    last_backup_datetime = datetime.strptime(
-        last_backup_timestamp, DATETIME_FORMAT)
-
-    query = session.query(model).filter(
-        sa.or_(
-            model.time_created > last_backup_datetime,
-            sa.and_(
-                model.time_updated != None, model.time_updated > last_backup_datetime
-            ),
-        )
-    )
-
-    records = query.all()
-    if records:
-        mode = "a" if os.path.exists(filename) else "w"
-        with open(filename, mode, newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            if mode == "w":  # Write headers only if the file is being created
-                writer.writerow(records[0].__table__.columns.keys())
+    ensure_folder_exists()
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        records = session.query(model).all()
+        if records:
+            writer.writerow(records[0].__table__.columns.keys())  # column headers
             for record in records:
-                writer.writerow(
-                    [
-                        getattr(record, column.name)
-                        for column in record.__table__.columns
-                    ]
-                )
-
-        latest_timestamp = max(
-            [
-                getattr(record, "time_updated") or getattr(record, "time_created")
-                for record in records
-            ]
-        )
-        save_last_backup_timestamp(
-            model, latest_timestamp.strftime(DATETIME_FORMAT)
-        )
-        print(f"Appended records to {filename} for {model_name}.")
-    else:
-        print(f"No new records to append for {model_name}.")
-
+                writer.writerow([getattr(record, column.name) for column in record.__table__.columns])
+        print(f"Data dumped to {filename} for {model.__name__}.")
 
 def backup_to_csv():
-    ensure_folder_exists(backup_folder)
+    ensure_folder_exists()
     for model in models:
         filename = f"{backup_folder}/{model.__name__}.csv"
         dump_table_to_csv(model, filename)
@@ -101,11 +45,15 @@ def backup_to_csv():
 
 
 def parse_datetime_or_none(value):
+    if value is None or value == "":
+        return None
     try:
         # Directly parse the ISO 8601 datetime string, including timezone
         return datetime.fromisoformat(value)
-    except (ValueError, TypeError):
-        return datetime.now().isoformat()
+    except ValueError:
+        # Return None or a default datetime if the format is not correct
+        return None
+
 
 
 def insert_from_csv(model, filename):
@@ -119,28 +67,15 @@ def insert_from_csv(model, filename):
             # Retrieve the existing record, if any
             existing_record = session.query(model).filter_by(id=row["id"]).first()
             if existing_record:
-                # Determine which record is newer
-                existing_updated_at = (
-                    existing_record.time_updated or existing_record.time_created
-                )
-                file_updated_at = row["time_updated"] or row["time_created"]
-                if existing_record.id == "MC-MEJAPACK-GRACE":
-                    print(file_updated_at)
-
-                if file_updated_at and file_updated_at > existing_updated_at:
-                    print("FOUND ONE: " + existing_record.id)
-                    # File record is newer; update existing database record
+                 # If there's an existing record, check which one is more recent
+                existing_last_time = existing_record.time_updated or existing_record.time_created
+                csv_last_time = row["time_updated"] or row["time_created"]
+                if (csv_last_time and existing_last_time) and (csv_last_time > existing_last_time):
                     for key, value in row.items():
                         setattr(existing_record, key, value)
-                    print(
-                        f"Updated record with ID {row['id']} from file for {model.__name__}."
-                    )
-                # else:
-                #     # Database record is newer; skip update
-                #     print(
-                #         f"Skipping update for ID {row['id']} as database record is newer for {model.__name__}."
-                #     )
-                continue
+                    print(f"Updated record with ID {row['id']} from {filename} for {model.__name__}.")
+                continue  # Skip to the next row if the database record is more recent or updated
+
 
             # If there's no existing record, insert new
             obj = model(**row)
@@ -155,7 +90,7 @@ def insert_from_csv(model, filename):
 
 
 def backup_from_csv():
-    ensure_folder_exists(backup_folder)
+    ensure_folder_exists()
     for model in models:
         filename = f"{backup_folder}/{model.__name__}.csv"
         insert_from_csv(model, filename)
