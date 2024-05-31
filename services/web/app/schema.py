@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Union, Optional, Dict
+from typing import Union, Optional, Dict, List
 from datetime import date
 
 from pydantic import BaseModel, constr
@@ -15,6 +15,10 @@ Tooling = sqlalchemy_to_pydantic(
 
 Operator = sqlalchemy_to_pydantic(
     models.Operator, exclude=["time_created", "time_updated"]
+)
+
+User = sqlalchemy_to_pydantic(
+    models.User, exclude=["time_created", "time_updated"]
 )
 
 ALPHABET_SPACE_PERIOD = "^[A-Za-z.\s]+$"
@@ -106,3 +110,8 @@ class CheckOperatorStatus(BaseModel):
     tooling_id: str
     mesin_id: str
     operator_id: str
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    role: str

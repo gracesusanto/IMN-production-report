@@ -1,0 +1,28 @@
+app = "imn-production-report"
+
+kill_signal = "SIGINT"
+kill_timeout = 5
+processes = []
+
+[env]
+DATABASE_URL = "postgres+psycopg2://postgres:TJ5g2DV6skIOJg3@imn-postgres.flycast:5432"
+SECRET_KEY = "423BE7763ECCBB21D5E80D4EEB1E201FF452D8B6BE6C0147579330CB5F3228E7"
+
+[[services]]
+  internal_port = 80
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+[deploy]
+  release_command = "pwd"
+
+[experimental]
+  allowed_public_ports = []
+  auto_rollback = true

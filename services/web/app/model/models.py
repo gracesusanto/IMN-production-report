@@ -191,3 +191,23 @@ class OperatorStatus(Base):
         "Tooling", backref="curr_operator", uselist=False
     )
     last_mesin = sa.orm.relationship("Mesin", backref="curr_operator", uselist=False)
+
+class UserRole(Enum):
+    ADMIN = "ADMIN"
+    EDITOR = "EDITOR"
+    VIEWER = "VIEWER"
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = sa.Column(sa.Integer, primary_key=True, index=True)
+    username = sa.Column(sa.String, unique=True, index=True)
+    hashed_password = sa.Column(sa.String)
+    role_id = sa.Column(sa.Integer, sa.ForeignKey('roles.id'))
+    role = sa.orm.relationship("Role")
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = sa.Column(sa.Integer, primary_key=True, index=True)
+    role = sa.Column(sa.String)

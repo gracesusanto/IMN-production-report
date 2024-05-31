@@ -5,6 +5,10 @@ pip install fastapi fastapi-sqlalchemy pydantic alembic psycopg2 uvicorn python-
 docker-compose run app alembic revision --autogenerate -m "dbinit"
 docker-compose run app alembic upgrade head
 
+docker exec -it app /bin/bash
+alembic revision --autogenerate -m "auth"
+alembic upgrade head
+
 docker-compose build
 docker-compose up
 
@@ -24,7 +28,7 @@ python3 generate_report.py
 docker logs --follow app
 
 ### Cara Memasukan Database
-1. Taruh data tooling di `data_all.csv` dengan format 
+1. Taruh data tooling di `data_all.csv` dengan format
 ```['M/C','Tonase','Customer','Part No.','Part Name','Child Part Name','Kode Tooling','Common Tooling Name','Proses','STD Jam (Pcs)','Operator']```
 1. Taruh data operator di `db_operator.csv` dan data mesin di `db_mesin.csv`
 

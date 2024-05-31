@@ -28,6 +28,7 @@ services:
     container_name: app
     build:
       context: ./services/web/
+      dockerfile: Dockerfile.dev
     # command: bash -c "alembic upgrade head && uvicorn app.main:app --host 192.168.0.218 --port 8000 --reload"
     # command: cron && bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     # command: bash -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"

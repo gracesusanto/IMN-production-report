@@ -25,6 +25,6 @@ COPY ./backup/crontab /etc/cron.d/backup-cron
 RUN chmod +x ./backup/backup.sh
 RUN chmod 0644 /etc/cron.d/backup-cron && crontab /etc/cron.d/backup-cron
 
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-CMD ["/start.sh"]
+COPY start-dev.sh /start-dev.sh
+RUN chmod +x /start-dev.sh
+CMD ["/start-dev.sh"]
