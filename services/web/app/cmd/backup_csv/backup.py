@@ -17,7 +17,6 @@ session = sessionmaker(autocommit=False, autoflush=False, bind=database.get_engi
 
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 backup_folder = "backup/csv"
-last_backup_timestamps_file = "app/cmd/backup_csv/last_backup_timestamps.json"
 models = [Mesin, Tooling, Operator]
 
 

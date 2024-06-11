@@ -106,3 +106,7 @@ class CheckOperatorStatus(BaseModel):
     tooling_id: str
     mesin_id: str
     operator_id: str
+
+class ReportBackupRequest(BaseModel):
+    month: Union[int, None] = None
+    year: Union[int, None] = None

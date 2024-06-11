@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, time, timedelta
 from enum import Enum
-import csv
+import calendar
 
 import pandas
 import sqlalchemy as sa
@@ -13,8 +13,8 @@ import app.model.models as models
 import app.schema as schema
 
 """
-All timezone-aware dates and times are stored internally in UTC. 
-They are converted to local time in the zone specified by 
+All timezone-aware dates and times are stored internally in UTC.
+They are converted to local time in the zone specified by
 the timezone configuration parameter before being displayed to the client.
 """
 _TIMEZONE = pytz.timezone("Asia/Jakarta")
@@ -172,6 +172,16 @@ def _calculate_datetime_range(
     return time_from, time_to
 
 
+def _get_month_range(year=None, month=None):
+    if year is None or month is None:
+        today = datetime.now()
+        year = year or today.year
+        month = month or today.month
+
+    first_day = datetime(year, month, 1)
+    last_day = datetime(year, month, calendar.monthrange(year, month)[1], 23, 59, 59)
+    return first_day, last_day
+
 def _generate_keterangan(row):
     keterangan = (
         (f"Coil No: {row['Coil No']}, " if row["Coil No"] else "")
@@ -208,8 +218,12 @@ def _calculate_productivity(row):
     if row["Desc"] != "U : Utility":
         return 0
 
-    # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
-    return ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
+    try:
+        # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
+        productivity = ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
+    except:
+        productivity = 0
+    return productivity
 
 
 def _calculate_ratio(row, type):
@@ -291,39 +305,7 @@ def query_activity_mesin(time_from, time_to, pagination):
     df.drop(["Coil No", "Lot No", "Pack No"], axis=1)
     return df
 
-
-class ReportCategory(Enum):
-    MESIN = "mesin"
-    OPERATOR = "operator"
-
-
-def get_report(
-    report_category: ReportCategory,
-    format: schema.FormatType = schema.FormatType.LIMAX,
-    date_time_from=None,
-    shift_from=None,
-    date_time_to=None,
-    shift_to=None,
-    pagination=None,
-    filters=None,
-    sort=None,
-):
-    date_from, shift_from, date_to, shift_to = _fill_default_datetime(
-        date_time_from, shift_from, date_time_to, shift_to
-    )
-
-    time_from, time_to = _calculate_datetime_range(
-        date_from=date_from,
-        shift_from=shift_from,
-        date_to=date_to,
-        shift_to=shift_to,
-    )
-
-    if "limax" in format.value:
-        pagination = filters = sort = None
-
-    df = query_activity_mesin(time_from, time_to, pagination)
-
+def df_to_report(df, report_category, filters, sort):
     df["Tanggal"] = (
         pandas.to_datetime(df.Start, utc=True)
         .map(lambda x: x.tz_convert("Asia/Jakarta"))
@@ -373,7 +355,6 @@ def get_report(
             if (df.loc[index]["Operator"] == df.loc[index - 1]["Operator"]) and (
                 df.loc[index]["Start"] != df.loc[index - 1]["Stop"]
             ):
-                print(df)
                 df.loc[index - 1, "Stop"] = df.loc[index]["Start"]
                 print(f"Modifying {index} {df.loc[index - 1]['Stop']}")
 
@@ -404,7 +385,7 @@ def get_report(
     if filters is not None:
         df = _filter_df(df, filters)
     if sort:
-        print(sort.sort_by, sort.direction)
+        # print(sort.sort_by, sort.direction)
         df = df.sort_values(
             by=[sort.sort_by], ascending=(sort.direction == "ascending")
         )
@@ -421,43 +402,57 @@ def get_report(
     df["Kode Keterangan"] = df["Desc"].apply(lambda Desc: Desc[0:2].strip())
 
     df.drop(["Start", "Stop"], axis=1, inplace=True)
+    return df
+
+class ReportCategory(Enum):
+    MESIN = "mesin"
+    OPERATOR = "operator"
+
+
+def get_report(
+    report_category: ReportCategory,
+    format: schema.FormatType = schema.FormatType.LIMAX,
+    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None,
+    pagination=None, filters=None, sort=None,
+    is_backup=None, backup_year=None, backup_month=None
+):
+    date_from, shift_from, date_to, shift_to = _fill_default_datetime(
+        date_time_from, shift_from, date_time_to, shift_to
+    )
+
+
+    if not is_backup:
+        time_from, time_to = _calculate_datetime_range(
+            date_from=date_from, shift_from=shift_from,
+            date_to=date_to, shift_to=shift_to,
+        )
+    else:
+        time_from, time_to = _get_month_range(backup_year, backup_month)
+
+
+    if ("limax" in format.value) or (is_backup == True) :
+        pagination = filters = sort = None
+
+    df = query_activity_mesin(time_from, time_to, pagination)
+    df = df_to_report(df, report_category, filters, sort)
+
+    sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
+    sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
 
     # imn report
     df_imn = df.copy(deep=True)
     imn_header = [
-        sort_by_first,
-        "Shift",
-        "Tanggal",
-        "StartTime",
-        "StopTime",
-        sort_by_next,
-        "Kode Tooling",
-        "Common Tooling Name",
-        "Part No",
-        "Part Name",
-        "Qty",
-        "Target",
-        "Reject",
-        "Rework",
-        "Desc",
-        "Duration",
-        "Productivity",
-        "Reject Ratio",
-        "Rework Ratio",
-        "Keterangan",
+        sort_by_first, "Shift", "Tanggal", "StartTime", "StopTime", sort_by_next,
+        "Kode Tooling", "Common Tooling Name", "Part No", "Part Name", "Qty", "Target",
+        "Reject", "Rework", "Desc", "Duration", "Productivity", "Reject Ratio", "Rework Ratio", "Keterangan",
     ]
     df_imn = df_imn[imn_header]
 
     df_imn.to_csv(
         _get_csv_folder(
-            format="imn",
-            type=report_category.value,
-            date_from=date_from,
-            shift_from=shift_from,
-            date_to=date_to,
-            shift_to=shift_to,
-        ),
-        sep=";",
+            format="imn", type=report_category.value, date_from=date_from,
+            shift_from=shift_from, date_to=date_to, shift_to=shift_to,
+        ), sep=";",
     )
 
     # limax report
@@ -477,17 +472,8 @@ def get_report(
     }
     df_limax.rename(columns=limax_header, inplace=True)
     limax_col = [
-        "STR_DATE",
-        "STR_PLNT",
-        "TLG_CODE",
-        "STR_KUAN",
-        "PEG_CODE",
-        "SHF_CODE",
-        "MSN_CODE",
-        "STR_AWAL",
-        "STR_AKHR",
-        "DWN_CODE",
-        "STR_DESC",
+        "STR_DATE", "STR_PLNT", "TLG_CODE", "STR_KUAN", "PEG_CODE",
+        "SHF_CODE", "MSN_CODE", "STR_AWAL", "STR_AKHR", "DWN_CODE", "STR_DESC",
     ]
     for col in df_limax.columns:
         if col not in limax_col:
@@ -497,24 +483,24 @@ def get_report(
 
     df_limax.to_csv(
         _get_csv_folder(
-            format="limax",
-            type=report_category.value,
-            date_from=date_from,
-            shift_from=shift_from,
-            date_to=date_to,
-            shift_to=shift_to,
-        ),
-        sep=";",
-        index=False,
+            format="limax", type=report_category.value, date_from=date_from,
+            shift_from=shift_from, date_to=date_to, shift_to=shift_to,
+        ), sep=";", index=False,
     )
 
-    filename = _get_csv_filename(
-        report_category.value,
-        date_from=date_from,
-        shift_from=shift_from,
-        date_to=date_to,
-        shift_to=shift_to,
-    )
+    if is_backup == True:
+        filename = backup_filename(
+            report_category=report_category,
+            format=format,
+            year=backup_year,
+            month=backup_month,
+        )
+    else:
+        filename = _get_csv_filename(
+            report_category.value,
+            date_from=date_from, shift_from=shift_from,
+            date_to=date_to, shift_to=shift_to,
+        )
 
     if "limax" in format.value:
         return df_limax, filename
@@ -531,6 +517,7 @@ def get_mesin_report(
     pagination=None,
     filters=None,
     sort=None,
+    is_backup=None, backup_year=None, backup_month=None,
 ):
     return get_report(
         ReportCategory.MESIN,
@@ -542,6 +529,9 @@ def get_mesin_report(
         pagination,
         filters,
         sort,
+        is_backup,
+        backup_year,
+        backup_month,
     )
 
 
@@ -554,6 +544,7 @@ def get_operator_report(
     pagination=None,
     filters=None,
     sort=None,
+    is_backup=None, backup_year=None, backup_month=None,
 ):
     return get_report(
         ReportCategory.OPERATOR,
@@ -565,8 +556,27 @@ def get_operator_report(
         pagination,
         filters,
         sort,
+        is_backup,
+        backup_year,
+        backup_month,
     )
 
+def backup_filename(report_category: ReportCategory,
+    format: schema.FormatType,
+    year=None, month=None):
+
+    directory = f"backup/report"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    if year is None or month is None:
+        now = datetime.now()
+        year = year or now.year
+        month = month or now.month
+
+    formatted_date = f"{year}_{month:02d}"
+    filename = f"{directory}/backup_{report_category.value}_{format}_{formatted_date}.csv"
+    return filename
 
 if __name__ == "__main__":
     get_mesin_report(date_time_from=datetime(2023, 6, 14, 0, 0, 0))
