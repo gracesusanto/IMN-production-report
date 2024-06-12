@@ -17,7 +17,7 @@ Operator = sqlalchemy_to_pydantic(
     models.Operator, exclude=["time_created", "time_updated"]
 )
 
-ALPHABET_SPACE_PERIOD = "^[A-Za-z.\s]+$"
+ALPHANUMERIC_SPACE_PERIOD = "^[A-Za-z0-9.\s]+$"
 ALPHANUMERIC_HYPHENS = "^[A-Za-z0-9\-]+$"
 DIGIT = "^[0-9]+$"
 DIGIT_SLASH_DIGIT = "^\d+/\d+$"
@@ -25,7 +25,7 @@ DIGIT_SLASH_DIGIT = "^\d+/\d+$"
 
 class OperatorCreate(BaseModel):
     nik: constr(regex=ALPHANUMERIC_HYPHENS)  # Alphanumeric characters and hyphens
-    name: constr(regex=ALPHABET_SPACE_PERIOD)  # Alphabetic characters and periods
+    name: constr(regex=ALPHANUMERIC_SPACE_PERIOD)  # Alphabetic characters and periods
 
 
 class MesinCreate(BaseModel):
