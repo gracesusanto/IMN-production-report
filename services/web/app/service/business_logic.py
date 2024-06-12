@@ -524,7 +524,7 @@ def validate_nik(nik: str) -> bool:
 
 def validate_name(name: str) -> bool:
     # Alphabetic characters, periods, and spaces
-    return re.match(schema.ALPHABET_SPACE_PERIOD, name) is not None
+    return re.match(schema.ALPHANUMERIC_SPACE_PERIOD, name) is not None
 
 
 def validate_mesin_name(name: str) -> bool:
