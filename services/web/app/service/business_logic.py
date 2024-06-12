@@ -168,6 +168,14 @@ def start_activity(activity, session):
             .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
             .one_or_none()
         )
+        if operator_status_old is None:
+            operator_status_old=models.OperatorStatus(
+                id=mesin_status.last_operator_id,
+                last_tooling_id=mesin_status.last_tooling_id,
+                last_mesin_id=mesin_status.id,
+            )
+            session.add(operator_status_old)
+            session.commit()
         operator_status_old.status = models.DisplayedStatus.IDLE
 
     operator_status_new = (
@@ -175,6 +183,15 @@ def start_activity(activity, session):
         .filter(models.OperatorStatus.id == operator_id)
         .one_or_none()
     )
+    if operator_status_new is None:
+        operator_status_new = models.OperatorStatus(
+            id=operator_id,
+            last_tooling_id=tooling_id,
+            last_mesin_id=mesin_id,
+        )
+        session.add(operator_status_new)
+        session.commit()
+
     operator_status_new.last_tooling_id = tooling_id
     operator_status_new.last_mesin_id = mesin_id
     operator_status_new.status = models.DisplayedStatus.RUNNING
@@ -258,6 +275,9 @@ def first_stop_activity(activity, session):
     session.add(utility)
     session.commit()
 
+    print("GRACE")
+    print(downtime_category)
+
     displayed_status = _get_displayed_status(downtime_category)
 
     if (mesin_status.last_operator_id != operator_id) or (
@@ -269,6 +289,14 @@ def first_stop_activity(activity, session):
             .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
             .one_or_none()
         )
+        if operator_status_old is None:
+            operator_status_old=models.OperatorStatus(
+                id=mesin_status.last_operator_id,
+                last_tooling_id=mesin_status.last_tooling_id,
+                last_mesin_id=mesin_status.id,
+            )
+            session.add(operator_status_old)
+            session.commit()
         operator_status_old.status = models.DisplayedStatus.IDLE
 
     operator_status_new = (
@@ -276,6 +304,15 @@ def first_stop_activity(activity, session):
         .filter(models.OperatorStatus.id == operator_id)
         .one_or_none()
     )
+    if operator_status_new is None:
+        operator_status_new = models.OperatorStatus(
+            id=operator_id,
+            last_tooling_id=tooling_id,
+            last_mesin_id=mesin_id,
+        )
+        session.add(operator_status_new)
+        session.commit()
+
     operator_status_new.last_tooling_id = tooling_id
     operator_status_new.last_mesin_id = mesin_id
     operator_status_new.status = displayed_status
@@ -366,6 +403,14 @@ def continue_stop_activity(activity, session):
             .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
             .one_or_none()
         )
+        if operator_status_old is None:
+            operator_status_old=models.OperatorStatus(
+                id=mesin_status.last_operator_id,
+                last_tooling_id=mesin_status.last_tooling_id,
+                last_mesin_id=mesin_status.id,
+            )
+            session.add(operator_status_old)
+            session.commit()
         operator_status_old.status = models.DisplayedStatus.IDLE
 
     operator_status_new = (
@@ -373,6 +418,14 @@ def continue_stop_activity(activity, session):
         .filter(models.OperatorStatus.id == operator_id)
         .one_or_none()
     )
+    if operator_status_new is None:
+        operator_status_new = models.OperatorStatus(
+            id=operator_id,
+            last_tooling_id=tooling_id,
+            last_mesin_id=mesin_id,
+        )
+        session.add(operator_status_new)
+        session.commit()
     operator_status_new.last_tooling_id = tooling_id
     operator_status_new.last_mesin_id = mesin_id
     operator_status_new.status = displayed_status

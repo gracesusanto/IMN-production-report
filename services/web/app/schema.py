@@ -34,7 +34,7 @@ class MesinCreate(BaseModel):
 
 
 class ToolingCreate(BaseModel):
-    customer: constr(regex=ALPHABET_SPACE_PERIOD)
+    customer: str
     part_no: constr(regex=ALPHANUMERIC_HYPHENS)
     child_part_name: str
     common_tooling_name: str
@@ -106,3 +106,7 @@ class CheckOperatorStatus(BaseModel):
     tooling_id: str
     mesin_id: str
     operator_id: str
+
+class ReportBackupRequest(BaseModel):
+    month: Union[int, None] = None
+    year: Union[int, None] = None

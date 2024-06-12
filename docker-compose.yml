@@ -29,12 +29,16 @@ services:
     build:
       context: ./services/web/
     # command: bash -c "alembic upgrade head && uvicorn app.main:app --host 192.168.0.218 --port 8000 --reload"
-    command: bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    # command: cron && bash -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     # command: bash -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - ./services/web/:/app
+      - ./services/web/backup/backups:/app/backup/backups
     environment:
       - DATABASE_URL=${DATABASE_URL}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
     ports:
       - 8000:8000
     depends_on:

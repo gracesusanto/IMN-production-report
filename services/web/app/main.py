@@ -20,6 +20,7 @@ import app.cmd.generate_report as generate_report
 import app.cmd.db_ingestion as db_ingestion
 import app.cmd.backup_csv.backup as backup
 import app.cmd.get_id as get_id
+import app.cmd.mock_data as mock_data
 
 load_dotenv(".env")
 
@@ -94,6 +95,25 @@ def get_report(request: schema.ReportRequest):
         sort=request.sort,
     )
     return business_logic.generate_report_response(df, filename, request.format)
+
+@app.post("/report-backup")
+def backup_report(request: schema.ReportBackupRequest):
+
+    for fmt in [schema.FormatType.LIMAX, schema.FormatType.IMN]:
+        df, filename = generate_report.get_operator_report(
+            format=fmt,
+            is_backup=True,
+            backup_year=request.year, backup_month=request.month
+        )
+        df.to_csv(filename)
+
+        df, filename = generate_report.get_mesin_report(
+            format=fmt,
+            is_backup=True,
+            backup_year=request.year, backup_month=request.month
+        )
+        df.to_csv(filename)
+    return
 
 
 @app.get("/mesin-status-all/")
@@ -428,6 +448,11 @@ async def delete_tooling(tooling_id: str, session=Sessioner):
 
     return fastapi.Response(status_code=204)
 
+
+@app.get("/mock-data")
+async def mock_data_api():
+    mock_data.run_activity()
+    return
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
