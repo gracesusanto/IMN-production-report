@@ -275,9 +275,6 @@ def first_stop_activity(activity, session):
     session.add(utility)
     session.commit()
 
-    print("GRACE")
-    print(downtime_category)
-
     displayed_status = _get_displayed_status(downtime_category)
 
     if (mesin_status.last_operator_id != operator_id) or (

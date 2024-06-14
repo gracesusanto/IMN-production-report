@@ -73,6 +73,10 @@ class MesinLog(Base):
         default=MesinLogEnum.START,
         nullable=True,
     )
+    time_created = sa.Column(
+        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
+    )
+    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
 
 class ActivityMesin(Base):
@@ -105,6 +109,10 @@ class ActivityMesin(Base):
     lot_no = sa.Column(sa.String, nullable=True)
     pack_no = sa.Column(sa.String, nullable=True)
     downtime_category = sa.Column(sa.String, nullable=False, default="U : Utility")
+    time_created = sa.Column(
+        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
+    )
+    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
 
 @strawberry.enum
@@ -161,6 +169,10 @@ class MesinStatus(Base):
         default=DisplayedStatus.IDLE,
         nullable=True,
     )
+    time_created = sa.Column(
+        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
+    )
+    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
 
 @strawberry.enum
@@ -191,3 +203,7 @@ class OperatorStatus(Base):
         "Tooling", backref="curr_operator", uselist=False
     )
     last_mesin = sa.orm.relationship("Mesin", backref="curr_operator", uselist=False)
+    time_created = sa.Column(
+        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
+    )
+    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
