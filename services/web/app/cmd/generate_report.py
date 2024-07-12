@@ -173,10 +173,15 @@ def _calculate_datetime_range(
 
 
 def _get_month_range(year=None, month=None):
+    today = datetime.now()
     if year is None or month is None:
-        today = datetime.now()
         year = year or today.year
         month = month or today.month
+
+    if year == 0:
+        year = today.year
+    if month == 0:
+        month = today.month
 
     first_day = datetime(year, month, 1)
     last_day = datetime(year, month, calendar.monthrange(year, month)[1], 23, 59, 59)
@@ -362,7 +367,6 @@ def df_to_report(df, report_category, filters, sort):
                 df.loc[index]["Start"] != df.loc[index - 1]["Stop"]
             ):
                 df.loc[index - 1, "Stop"] = df.loc[index]["Start"]
-                print(f"Modifying {index} {df.loc[index - 1]['Stop']}")
 
         df.drop(df.loc[df["Desc"] == "NP : No Plan"].index, inplace=True)
         df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
