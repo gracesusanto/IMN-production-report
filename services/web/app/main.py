@@ -31,9 +31,9 @@ app.add_middleware(DBSessionMiddleware, db_url=os.environ["DATABASE_URL"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://192.168.0.103:3000",
-        "http://192.168.0.218:3000",
+        "http://localhost:3333",
+        "http://192.168.0.103:3333",
+        "http://192.168.0.218:3333",
     ],  # Allows all origins
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
