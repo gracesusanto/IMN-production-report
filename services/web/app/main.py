@@ -115,6 +115,10 @@ def backup_report(request: schema.ReportBackupRequest):
         df.to_csv(filename)
     return
 
+@app.delete("/activity-and-log")
+def delete_old_data():
+    for model in [models.ActivityMesin, models.MesinLog]:
+        backup.delete_old_data(model)
 
 @app.get("/mesin-status-all/")
 def get_mesin_status(session=Sessioner):

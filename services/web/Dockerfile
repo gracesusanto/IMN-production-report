@@ -20,7 +20,6 @@ COPY ./requirements.txt requirements.txt
 RUN pip3 install --upgrade pip
 RUN pip3 install --no-cache-dir --upgrade -r requirements.txt
 COPY ./ /app
-COPY ./backup/backup.sh /app
 COPY ./backup/crontab /etc/cron.d/backup-cron
 RUN chmod +x ./backup/backup.sh
 RUN chmod 0644 /etc/cron.d/backup-cron && crontab /etc/cron.d/backup-cron

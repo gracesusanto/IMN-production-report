@@ -1,6 +1,6 @@
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -9,15 +9,16 @@ from app.model.models import (
     Mesin,
     Tooling,
     Operator,
+    MesinLog,
+    ActivityMesin,
 )  # Adjust the import path as needed
 import json
 
 # Create a session
 session = sessionmaker(autocommit=False, autoflush=False, bind=database.get_engine())()
 
-DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 backup_folder = "backup/csv"
-models = [Mesin, Tooling, Operator]
+models = [Mesin, Tooling, Operator, MesinLog, ActivityMesin]
 
 
 def ensure_folder_exists():
@@ -94,3 +95,10 @@ def backup_from_csv():
         filename = f"{backup_folder}/{model.__name__}.csv"
         insert_from_csv(model, filename)
     print("Data inserted from CSV files successfully.")
+
+def delete_old_data(model):
+    expired_date = datetime.now() - timedelta(days=90)
+    delete_query = session.query(model).filter(model.time_created < expired_date)
+    deleted_count = delete_query.delete(synchronize_session=False)
+    session.commit()
+    print(f"Deleted {deleted_count} records of {model.__name__}.")
