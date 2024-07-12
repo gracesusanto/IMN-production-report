@@ -207,7 +207,13 @@ def _generate_keterangan_limax(row):
 
 
 def _format_time_for_limax(time):
-    return datetime.strptime(time, "%H:%M:%S").strftime("%H%M")
+    # Convert to limax hour format: HHMM
+    dt = datetime.strptime(time, "%H:%M:%S").strftime("%H%M")
+    # Convert 00 hour into 24
+    if dt[:2] == "00":
+        return f"24{dt[2:]}"
+    else:
+        return dt
 
 
 engine = database.get_engine()

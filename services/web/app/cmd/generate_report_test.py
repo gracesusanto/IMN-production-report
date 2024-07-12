@@ -1,6 +1,9 @@
 import datetime
 import app.cmd.generate_report as helper
 
+# To run:
+# docker exec -it app /bin/bash
+# pytest app/cmd/generate_report_test.py
 
 def test_is_time_between():
     is_between = helper._is_time_between(
@@ -28,21 +31,21 @@ def test_get_csv_filename_1():
     filename = helper._get_csv_filename(
         "operator", datetime.date(2023, 3, 15), 1, datetime.date(2023, 3, 15), 1
     )
-    assert filename == "result_operator_2023-03-15_shift_1.csv"
+    assert filename == "result_operator_2023-03-15_shift_1"
 
 
 def test_get_csv_filename_2():
     filename = helper._get_csv_filename(
         "operator", datetime.date(2023, 3, 15), 1, datetime.date(2023, 3, 15), 3
     )
-    assert filename == "result_operator_2023-03-15_shift_1_to_shift_3.csv"
+    assert filename == "result_operator_2023-03-15_shift_1_to_shift_3"
 
 
 def test_get_csv_filename_3():
     filename = helper._get_csv_filename(
         "operator", datetime.date(2023, 3, 15), 1, datetime.date(2023, 3, 16), 1
     )
-    assert filename == "result_operator_2023-03-15_shift_1_to_2023-03-16_shift_1.csv"
+    assert filename == "result_operator_2023-03-15_shift_1_to_2023-03-16_shift_1"
 
 
 def test_convert_seconds_to_seconds():
@@ -153,3 +156,10 @@ def test_calculate_datetime_range_whole_day_saturday():
     # To convert to GMT +7, add 7 hours
     assert time_from == datetime.datetime(2023, 3, 11, 0)
     assert time_to == datetime.datetime(2023, 3, 11, 15)
+
+def test_convert_time_format():
+    assert helper._format_time_for_limax("00:00:00") == "2400"
+    assert helper._format_time_for_limax("12:30:45") == "1230"
+    assert helper._format_time_for_limax("23:59:59") == "2359"
+    assert helper._format_time_for_limax("01:05:00") == "0105"
+    assert helper._format_time_for_limax("12:00:00") == "1200"
