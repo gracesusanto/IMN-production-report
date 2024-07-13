@@ -32,4 +32,36 @@ PGPASSWORD=$DB_PASSWORD pg_dump -U $DB_USER -h $DB_HOST $DB_NAME > "$BACKUP_DIR/
 # Optional: Delete backups older than 30 days
 find $BACKUP_DIR -type f -name '*.sql' -mtime +30 -exec rm {} \;
 
+######## Backup Report ########
+# Get the current month and year
+current_month=$(date +%-m)
+current_year=$(date +%Y)
+
+# Calculate the last month and its year
+if [ "$current_month" -eq 1 ]; then
+    last_month=12
+    last_month_year=$((current_year - 1))
+else
+    last_month=$(printf "%d" $(($current_month - 1)))
+    last_month_year=$current_year
+fi
+
+# Send POST request for the current month and year
+curl -X 'POST' \
+  'http://localhost:8000/report-backup' \
+  -H "Content-Type: application/json" \
+  -d '{
+  "month": '$current_month',
+  "year": '$current_year'
+}'
+
+# Send POST request for the last month and year
+curl -X 'POST' \
+  'http://localhost:8000/report-backup' \
+  -H "Content-Type: application/json" \
+  -d '{
+  "month": '$last_month',
+  "year": '$last_month_year'
+}'
+
 echo "Database backup completed: $FILE_NAME"
