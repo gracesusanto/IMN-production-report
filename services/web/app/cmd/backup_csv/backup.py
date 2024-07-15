@@ -28,12 +28,19 @@ def ensure_folder_exists():
 def dump_table_to_csv(model, filename):
     ensure_folder_exists()
     with open(filename, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
+        writer = csv.writer(csvfile, delimiter=";")
         records = session.query(model).all()
         if records:
             writer.writerow(records[0].__table__.columns.keys())  # column headers
             for record in records:
-                writer.writerow([getattr(record, column.name) for column in record.__table__.columns])
+                # Add single quote to string columns
+                row = []
+                for column in record.__table__.columns:
+                    value = getattr(record, column.name)
+                    if isinstance(value, str):
+                        value = f'="{value}"'
+                    row.append(value)
+                writer.writerow(row)
         print(f"Data dumped to {filename} for {model.__name__}.")
 
 def backup_to_csv():
@@ -60,6 +67,11 @@ def insert_from_csv(model, filename):
     with open(filename, "r") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
+            # Remove leading single quote from string values
+            for key, value in row.items():
+                if isinstance(value, str) and value.startswith('="') and value.endswith('"'):
+                    row[key] = value[2:-1]
+
             # Convert string timestamps to datetime objects, handling None
             row["time_created"] = parse_datetime_or_none(row.get("time_created"))
             row["time_updated"] = parse_datetime_or_none(row.get("time_updated"))

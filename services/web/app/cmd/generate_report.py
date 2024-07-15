@@ -185,7 +185,7 @@ def _get_month_range(year=None, month=None):
 
     first_day = datetime(year, month, 1)
     last_day = datetime(year, month, calendar.monthrange(year, month)[1], 23, 59, 59)
-    return first_day, last_day
+    return first_day, last_day, year, month
 
 def _generate_keterangan(row):
     keterangan = (
@@ -437,7 +437,7 @@ def get_report(
             date_to=date_to, shift_to=shift_to,
         )
     else:
-        time_from, time_to = _get_month_range(backup_year, backup_month)
+        time_from, time_to, backup_year, backup_month = _get_month_range(backup_year, backup_month)
 
 
     if ("limax" in format.value) or (is_backup == True) :
