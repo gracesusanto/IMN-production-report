@@ -28,7 +28,7 @@ def ensure_folder_exists():
 def dump_table_to_csv(model, filename):
     ensure_folder_exists()
     with open(filename, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
+        writer = csv.writer(csvfile, delimiter=";")
         records = session.query(model).all()
         if records:
             writer.writerow(records[0].__table__.columns.keys())  # column headers
