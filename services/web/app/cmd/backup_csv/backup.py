@@ -65,7 +65,7 @@ def parse_datetime_or_none(value):
 
 def insert_from_csv(model, filename):
     with open(filename, "r") as csvfile:
-        reader = csv.DictReader(csvfile)
+        reader = csv.DictReader(csvfile, delimiter=";")
         for row in reader:
             # Remove leading single quote from string values
             for key, value in row.items():
