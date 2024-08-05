@@ -42,11 +42,14 @@ def _calculate_shift(row):
 def _calculate_shift_from_datetime(date_time):
     comp_time = date_time.time()
     if date_time.isoweekday() == 7:  # Sunday
-        return 0
+        return 1
     else:
         working_shift = _WORKING_SHIFT_JSON
 
         day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
+        # Adjusting day based on time (for early morning considerations)
+        if comp_time < time(7, 0) and day_of_week == "Saturday":  # Before 7 AM Saturday
+            day_of_week = "Weekday"
         duration = working_shift[day_of_week]["duration"]
         for shift, timestamp in working_shift[day_of_week]["start"].items():
             if _is_time_between(
@@ -54,7 +57,7 @@ def _calculate_shift_from_datetime(date_time):
             ):
                 return int(shift)
 
-    return 0
+    return 1
 
 
 def get_curr_datetime():
