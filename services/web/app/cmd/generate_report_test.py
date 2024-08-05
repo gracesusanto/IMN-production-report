@@ -21,10 +21,13 @@ def test_calculate_shift_from_datetime_saturday():
     shift = helper._calculate_shift_from_datetime(datetime.datetime(2023, 3, 11, 14))
     assert shift == 2, "Saturday 2PM is shift 2"
 
+def test_calculate_shift_from_datetime_saturday_midnight():
+    shift = helper._calculate_shift_from_datetime(datetime.datetime(2023, 3, 11, 1))
+    assert shift == 3, "Saturday 1AM is Friday shift 3"
 
 def test_calculate_shift_from_datetime_sunday():
     shift = helper._calculate_shift_from_datetime(datetime.datetime(2023, 3, 12, 14))
-    assert shift == 0, "Sunday 2PM is invalid shift"
+    assert shift == 1, "Sunday 2PM is invalid shift"
 
 
 def test_get_csv_filename_1():
