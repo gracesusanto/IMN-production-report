@@ -11,6 +11,8 @@ from openpyxl.drawing.image import Image as OpenpyxlImage
 from io import BytesIO
 import qrcode
 
+from pydantic import ValidationError
+
 import app.model.models as models
 import app.schema as schema
 
@@ -468,9 +470,11 @@ def insert_or_update_tooling(
         return new_tooling
 
 
-def insert_or_update_mesin(name: str, tonase: str, session) -> models.Mesin:
+def insert_or_update_mesin(mc: schema.MesinCreate, session) -> models.Mesin:
+    name = mc.name
+    tonase = mc.tonase
     if not validate_mesin_name(name) or not validate_tonase(tonase):
-        raise HTTPException(status_code=400, detail="Invalid name or tonase")
+        raise HTTPException(status_code=400, detail=f"Invalid name: {name}, tonase: {tonase}")
 
     mesin_id = f"MC-{name}".replace(" ", "-")
     existing_mesin = (
@@ -491,9 +495,11 @@ def insert_or_update_mesin(name: str, tonase: str, session) -> models.Mesin:
         return new_mesin
 
 
-def insert_or_update_operator(name: str, nik: str, session) -> models.Operator:
+def insert_or_update_operator(op: schema.OperatorCreate, session) -> models.Operator:
+    name = op.name
+    nik = op.nik
     if not validate_nik(nik) or not validate_name(name):
-        raise HTTPException(status_code=400, detail="Invalid name or nik")
+        raise HTTPException(status_code=400, detail=f"Invalid name: {name}, nik: {nik}")
 
     operator_id = f"OP-{name.title()}".replace(" ", "-")
     existing_operator = (
@@ -534,28 +540,53 @@ def validate_tonase(tonase: str) -> bool:
     return re.match(schema.DIGIT, tonase) is not None
 
 
-def process_operator_row(row, session):
-    name, nik = row[0].strip(), row[1].strip()
-    insert_or_update_operator(name, nik, session)
+def process_operator_row(row, row_index, session):
+    try:
+        operator_data = schema.OperatorCreate(
+            name=row[0].strip(),
+            nik=row[1].strip(),
+        )
+        insert_or_update_operator(operator_data, session)
+    except ValidationError as e:
+        error_messages = ', '.join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
+        raise HTTPException(status_code=400, detail=f"Row {row_index}: {error_messages}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Row {row_index}: {str(e)}")
 
 
-def process_mesin_row(row, session):
-    name, tonase = row[0].strip(), row[1].strip()
-    insert_or_update_mesin(name, tonase, session)
+def process_mesin_row(row, row_index, session):
+    try:
+        mesin_data = schema.MesinCreate(
+            name=row[0].strip(),
+            tonase=row[1].strip(),
+        )
+        insert_or_update_mesin(mesin_data, session)
+    except ValidationError as e:
+        error_messages = ', '.join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
+        raise HTTPException(status_code=400, detail=f"Row {row_index}: {error_messages}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Row {row_index}: {str(e)}")
 
 
-def process_tooling_row(row, session):
-    tooling_data = schema.ToolingCreate(
-        customer=row[0].strip(),
-        part_no=row[1].strip(),
-        part_name=row[2].strip(),
-        child_part_name=row[3].strip(),
-        kode_tooling=row[4].strip(),
-        common_tooling_name=row[5].strip(),
-        proses=row[6].strip(),
-        std_jam=int(row[7].strip()),
-    )
-    insert_or_update_tooling(tooling_data, session)
+
+def process_tooling_row(row, row_index, session):
+    try:
+        tooling_data = schema.ToolingCreate(
+            customer=row[0].strip(),
+            part_no=row[1].strip(),
+            part_name=row[2].strip(),
+            child_part_name=row[3].strip(),
+            kode_tooling=row[4].strip(),
+            common_tooling_name=row[5].strip(),
+            proses=row[6].strip(),
+            std_jam=int(row[7].strip()),
+        )
+        insert_or_update_tooling(tooling_data, session)
+    except ValidationError as e:
+        error_messages = ', '.join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
+        raise HTTPException(status_code=400, detail=f"Row {row_index}: {error_messages}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Row {row_index}: {str(e)}")
 
 
 def process_csv(file_content, row_processor, session):
@@ -569,8 +600,8 @@ def process_csv(file_content, row_processor, session):
             csvfile.seek(0)  # Reset to start of file in case the sniffing fails
             csvreader = list(csv.reader(csvfile, delimiter=","))
 
-        for row in csvreader:
-            row_processor(row, session)
+        for index, row in enumerate(csvreader, start=1):
+            row_processor(row, index, session)
         session.commit()
     except Exception as e:
         session.rollback()
