@@ -327,7 +327,7 @@ def get_stop(session=Sessioner):
 @app.post("/operator/", response_model=schema.Operator)
 def create_operator(operator_data: schema.OperatorCreate, session=Sessioner):
     operator = business_logic.insert_or_update_operator(
-        operator_data.name, operator_data.nik, session
+        operator_data, session
     )
 
     try:
@@ -341,7 +341,7 @@ def create_operator(operator_data: schema.OperatorCreate, session=Sessioner):
 @app.post("/mesin/", response_model=schema.Mesin)
 def create_mesin(mesin_data: schema.MesinCreate, session=Sessioner):
     mesin = business_logic.insert_or_update_mesin(
-        mesin_data.name, mesin_data.tonase, session
+        mesin_data, session
     )
     try:
         session.commit()

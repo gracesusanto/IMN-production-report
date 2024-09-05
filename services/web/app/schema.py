@@ -1,8 +1,9 @@
 from enum import Enum
 from typing import Union, Optional, Dict
 from datetime import date
+import re
 
-from pydantic import BaseModel, constr
+from pydantic import BaseModel, constr, validator
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 
 import app.model.models as models
@@ -24,24 +25,65 @@ DIGIT_SLASH_DIGIT = "^\d+/\d+$"
 
 
 class OperatorCreate(BaseModel):
-    nik: constr(regex=ALPHANUMERIC_HYPHENS)  # Alphanumeric characters and hyphens
-    name: constr(regex=ALPHANUMERIC_SPACE_PERIOD)  # Alphabetic characters and periods
+    nik: str
+    name: str
 
+    @validator('nik')
+    def validate_nik(cls, v, field):
+        if not re.match(ALPHANUMERIC_HYPHENS, v):
+            raise ValueError(f"{field.name}: {v} must contain only alphanumeric characters or hyphens")
+        return v
+
+    @validator('name')
+    def validate_name(cls, v, field):
+        if not re.match(ALPHANUMERIC_SPACE_PERIOD, v):
+            raise ValueError(f"{field.name}: {v} must contain only alphanumeric characters, spaces, or periods")
+        return v
 
 class MesinCreate(BaseModel):
-    name: constr(regex=ALPHANUMERIC_HYPHENS)  # Alphabetic characters and hyphens
-    tonase: constr(regex=DIGIT)
+    name: str
+    tonase: str
+
+    @validator('name')
+    def validate_name(cls, v, field):
+        if not re.match(ALPHANUMERIC_HYPHENS, v):
+            raise ValueError(f"{field.name}: {v} must contain only alphanumeric characters or hyphens")
+        return v
+
+    @validator('tonase')
+    def validate_tonase(cls, v, field):
+        if not re.match(DIGIT, v):
+            raise ValueError(f"{field.name}: {v} must contain only digits")
+        return v
 
 
 class ToolingCreate(BaseModel):
     customer: str
-    part_no: constr(regex=ALPHANUMERIC_HYPHENS)
-    child_part_name: str
-    common_tooling_name: str
-    std_jam: constr(regex=DIGIT)
+    part_no: str
     part_name: str
+    child_part_name: str
     kode_tooling: str
-    proses: constr(regex=DIGIT_SLASH_DIGIT)
+    common_tooling_name: str
+    proses: str
+    std_jam: int
+
+    @validator('part_no', 'common_tooling_name', each_item=True)
+    def check_alphanumeric_hyphens(cls, value, field):
+        if not re.match(ALPHANUMERIC_HYPHENS, value):
+            raise ValueError(f"{field.name}: {value} must contain only alphanumeric characters or hyphens")
+        return value
+
+    @validator('std_jam')
+    def check_digits(cls, value, field):
+        if not re.match(DIGIT, str(value)):
+            raise ValueError(f"{field.name}: {value} must contain only digits")
+        return value
+
+    @validator('proses')
+    def check_digit_slash_digit(cls, value, field):
+        if not re.match(DIGIT_SLASH_DIGIT, value):
+            raise ValueError(f"{field.name}: {value} must be in the format 'digit/digit'")
+        return value
 
     class Config:
         orm_mode = True
