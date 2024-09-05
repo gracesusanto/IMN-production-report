@@ -67,7 +67,7 @@ class ToolingCreate(BaseModel):
     proses: str
     std_jam: int
 
-    @validator('part_no', 'common_tooling_name', each_item=True)
+    @validator('part_no')
     def check_alphanumeric_hyphens(cls, value, field):
         if not re.match(ALPHANUMERIC_HYPHENS, value):
             raise ValueError(f"{field.name}: {value} must contain only alphanumeric characters or hyphens")
