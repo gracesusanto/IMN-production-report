@@ -50,7 +50,7 @@ def no_0_seed_data():
 
     for mesin in mesins:
         # MC-A1-MOCK, MC-A2-MOCK
-        new_mesin = business_logic.insert_or_update_mesin(mesin.name, mesin.tonase, session)
+        new_mesin = business_logic.insert_or_update_mesin(mesin, session)
         mesin_ids.append(new_mesin.id)
     for tooling in toolings:
         # TL-TOOLING-01-001, TL-TOOLING-02-002
@@ -58,7 +58,7 @@ def no_0_seed_data():
         tooling_ids.append(new_tooling.id)
     for operator in operators:
         # OP-Operator-A, OP-Operator-B
-        new_operator = business_logic.insert_or_update_operator(operator.name, operator.nik, session)
+        new_operator = business_logic.insert_or_update_operator(operator, session)
         operator_ids.append(new_operator.id)
 
     session.commit()
