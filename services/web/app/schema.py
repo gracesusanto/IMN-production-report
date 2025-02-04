@@ -152,3 +152,12 @@ class CheckOperatorStatus(BaseModel):
 class ReportBackupRequest(BaseModel):
     month: Union[int, None] = None
     year: Union[int, None] = None
+
+User = sqlalchemy_to_pydantic(
+    models.User, exclude=["time_created", "time_updated"]
+)
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    role: str

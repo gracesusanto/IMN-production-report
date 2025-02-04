@@ -207,3 +207,24 @@ class OperatorStatus(Base):
         sa.DateTime(timezone=True), server_default=sa.sql.func.now()
     )
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
+
+
+class UserRole(Enum):
+    ADMIN = "ADMIN"
+    EDITOR = "EDITOR"
+    VIEWER = "VIEWER"
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = sa.Column(sa.Integer, primary_key=True, index=True)
+    username = sa.Column(sa.String, unique=True, index=True)
+    hashed_password = sa.Column(sa.String)
+    role_id = sa.Column(sa.Integer, sa.ForeignKey('roles.id'))
+    role = sa.orm.relationship("Role")
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = sa.Column(sa.Integer, primary_key=True, index=True)
+    role = sa.Column(sa.String)

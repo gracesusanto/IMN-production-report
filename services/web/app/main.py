@@ -1,13 +1,14 @@
 import os
-import io
+from datetime import timedelta
 
 import fastapi
-from fastapi import UploadFile, File, HTTPException
+from fastapi import UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
 from fastapi_sqlalchemy import DBSessionMiddleware
 from fastapi.responses import StreamingResponse
+from passlib.context import CryptContext
 
 from sqlalchemy.orm import aliased
 from sqlalchemy import case, func, desc
@@ -21,6 +22,7 @@ import app.cmd.db_ingestion as db_ingestion
 import app.cmd.backup_csv.backup as backup
 import app.cmd.get_id as get_id
 import app.cmd.mock_data as mock_data
+import app.auth as auth
 
 load_dotenv(".env")
 
@@ -40,6 +42,45 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+@app.post("/token")
+async def login_for_access_token(form_data: fastapi.security.OAuth2PasswordRequestForm = Depends(), db=Sessioner):
+    user = auth.authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/users/me", response_model=schema.User)
+async def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
+    return current_user
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def create_user(username: str, password: str, role_name: str, db_session):
+    hashed_password = pwd_context.hash(password)
+    role = db_session.query(models.Role).filter(models.Role.role == role_name).first()
+    if role is None:
+        raise ValueError(f"No such role: {role_name}")
+
+    new_user = models.User(username=username, hashed_password=hashed_password, role=role)
+    db_session.add(new_user)
+    db_session.commit()
+    return new_user
+
+@app.post("/users/")
+def create_user_endpoint(username: str, password: str, role: str, db=Sessioner):
+    db_user = db.query(models.User).filter(models.User.username == username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    try:
+        user = create_user(username, password, role, db)
+        return {"username": user.username, "id": user.id, "role": user.role}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/db-ingestion")
 def import_to_db():
@@ -200,7 +241,7 @@ def get_operator(operator_id: str, session=Sessioner):
         raise fastapi.HTTPException(404, f"No Operator with id {operator_id} found.")
     return operator
 
-
+# check_operator_status
 @app.post("/operator-status")
 def check_operator_status(request: schema.CheckOperatorStatus, session=Sessioner):
     mesin_status_ok, mesin_error_msg = business_logic.check_mesin(
