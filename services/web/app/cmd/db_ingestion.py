@@ -169,10 +169,10 @@ def import_to_db(filename):
     import_tooling(filename)
 
     # Import Mesin
-    import_mesin(filename)
+    # import_mesin(filename)
 
     # Import Operator Data
-    import_operator(filename, offset=10)
+    # import_operator(filename, offset=10)
 
     session.commit()
 
