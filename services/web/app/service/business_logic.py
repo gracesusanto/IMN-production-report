@@ -39,59 +39,94 @@ def is_operator_running(operator_id, session):
 
 
 def check_operator(tooling_id, mesin_id, operator_id, session):
+    """
+    Determines whether an operator is allowed to start a new activity.
+
+    The operator can start a new activity only if:
+    1. They have no ongoing activity (either running or downtime).
+    2. They are resuming the same ongoing activity.
+
+    Otherwise, it prevents the operator from starting a new one.
+    """
+
+    # Fetch the current status of the operator, if it exists
     operator_status = (
         session.query(models.OperatorStatus)
         .filter(models.OperatorStatus.id == operator_id)
         .one_or_none()
     )
 
+    # If the operator does not exist in the status table, assume they are idle.
     if operator_status is None:
         operator_status = models.OperatorStatus(
             id=operator_id,
-            status=models.DisplayedStatus.RUNNING,
+            status=models.DisplayedStatus.RUNNING,  # Setting status to RUNNING since they are starting a task
             last_tooling_id=tooling_id,
             last_mesin_id=mesin_id,
         )
         session.add(operator_status)
         session.commit()
-        return True, ""
+        return True, ""  # Allow the new activity to proceed
 
+    # If the operator is NOT currently running, they are allowed to start a new activity.
+    # This includes cases where they are in IDLE or DOWNTIME.
     if operator_status.status != models.DisplayedStatus.RUNNING:
         return True, ""
-    else:
-        if (
-            operator_status.last_tooling_id == tooling_id
-            and operator_status.last_mesin_id == mesin_id
-        ):
-            return True, ""
 
+    # If the operator is already working on the same mesin & tooling, allow them to continue.
+    if (
+        operator_status.last_tooling_id == tooling_id
+        and operator_status.last_mesin_id == mesin_id
+    ):
+        return True, ""  # Operator is resuming the same task, so no issue.
+
+    # If the operator is already running a different activity, block them.
+    # This ensures an operator does not work on multiple machines simultaneously.
     message = (
         f"ERROR \nOperator {operator_id} sedang running di \n"
         + f"Mesin:\t {operator_status.last_mesin_id} \n"
         + f"Tooling:\t {operator_status.last_tooling_id}\n\n"
-        + f"Silahkan stop operasi di Mesin {operator_status.last_mesin_id} dan Tooling {operator_status.last_tooling_id} dengan kategori NP : No Planning, \n"
-        + "atau ganti operator di mesin tersebut.\n\n"
+        + f"Silahkan stop operasi di Mesin {operator_status.last_mesin_id} dan Tooling {operator_status.last_tooling_id} "
+        + "dengan kategori NP : No Planning, atau ganti operator di mesin tersebut.\n\n"
     )
 
-    return False, message
+    return False, message  # Operator is not allowed to start a new task until they finish the current one.
+
 
 
 def check_mesin(mesin_id, operator_id, session):
+    """
+    Determines whether an operator can use a specific mesin (machine).
+
+    A machine is available if:
+    1. It is not currently running.
+    2. It is running but with the same operator who is making the request.
+
+    Otherwise, the request is rejected to prevent conflicting activities.
+    """
+
+    # Fetch the current status of the machine, if it exists
     mesin_status = (
         session.query(models.MesinStatus)
         .filter(models.MesinStatus.id == mesin_id)
         .one_or_none()
     )
 
+    # If the machine has no recorded status, assume it is available.
     if mesin_status is None:
-        return True, ""
+        return True, ""  # Machine is free to use
 
+    # If the machine is NOT currently in RUNNING status, it is available.
+    # This includes IDLE (not in use) and SETUP (downtime activities).
     if mesin_status.displayed_status != models.DisplayedStatus.RUNNING:
         return True, ""
 
+    # If the machine is already running, but the same operator is requesting it, allow it.
+    # This prevents redundant checks when the operator is simply resuming work.
     if mesin_status.last_operator_id == operator_id:
-        return True, ""
+        return True, ""  # The same operator is continuing the activity.
 
+    # If the machine is already in use by another operator, block access.
     message = (
         f"ERROR \nMesin {mesin_id} sedang running dengan detail \n"
         + f"Operator:\t {mesin_status.last_operator_id} \n"
@@ -99,7 +134,8 @@ def check_mesin(mesin_id, operator_id, session):
         + "Silahkan stop mesin terlebih dahulu."
     )
 
-    return False, message
+    return False, message  # Machine is in use and cannot be reassigned.
+
 
 
 def start_activity(activity, session):
