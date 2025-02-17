@@ -65,7 +65,7 @@ class ToolingCreate(BaseModel):
     kode_tooling: str
     common_tooling_name: str
     proses: str
-    std_jam: int
+    std_jam: str
 
     @validator('part_no')
     def check_alphanumeric_hyphens(cls, value, field):
@@ -75,7 +75,7 @@ class ToolingCreate(BaseModel):
 
     @validator('std_jam')
     def check_digits(cls, value, field):
-        if not re.match(DIGIT, str(value)):
+        if not re.match(DIGIT, value):
             raise ValueError(f"{field.name}: {value} must contain only digits")
         return value
 
