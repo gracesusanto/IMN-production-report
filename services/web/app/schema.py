@@ -103,17 +103,18 @@ class FormatType(str, Enum):
 
 
 class Activity(BaseModel):
-    type: ActivityType
     tooling_id: str
     mesin_id: str
     operator_id: str
-    category_downtime: Union[str, None]
+    curr_category: Union[str, None]
+    next_category: str
     output: Union[int, None] = None
     reject: Union[int, None] = None
     rework: Union[int, None] = None
     coil_no: Union[str, None] = None
     lot_no: Union[str, None] = None
     pack_no: Union[str, None] = None
+    keterangan: Union[str, None] = None
 
 
 class FieldFilter(BaseModel):
@@ -144,10 +145,10 @@ class ReportRequest(BaseModel):
     sort: Optional[SortConfig] = None
 
 
-class CheckOperatorStatus(BaseModel):
-    tooling_id: str
+class ActivityStatusRequest(BaseModel):
     mesin_id: str
     operator_id: str
+    curr_category: str  # curr_category is to return RUNNING/IDLE/SETUP for ConfirmScreen next screen. Should ideally be in a separate request
 
 class ReportBackupRequest(BaseModel):
     month: Union[int, None] = None

@@ -18,7 +18,8 @@ import json
 session = sessionmaker(autocommit=False, autoflush=False, bind=database.get_engine())()
 
 backup_folder = "backup/csv"
-models = [Mesin, Tooling, Operator, MesinLog, ActivityMesin]
+# models = [Mesin, Tooling, Operator, MesinLog, ActivityMesin]
+models = [Mesin, Tooling, Operator]
 
 
 def ensure_folder_exists():

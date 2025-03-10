@@ -50,160 +50,94 @@ class Operator(Base):
     )
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
-
-@strawberry.enum
-class MesinLogEnum(Enum):
-    """Start / Stop Mesin"""
-
-    START = "START"
-    STOP = "STOP"
-
-
 class MesinLog(Base):
+    """
+    MesinLog can only record time because this tracks the start of an activity
+
+    START means mesin is entering RUNNING state
+    STOP means mesin is entering non-RUNNING state
+
+    Stores raw event logs for machine activity transitions.
+
+    - Ensures strict chronological tracking of machine states.
+    - Captures START and STOP events for reference.
+    - Provides a timestamped history of machine operations.
+
+    This table does not store production metrics. It is designed to log
+    activity changes so that machine states remain sequential and non-overlapping.
+    """
     __tablename__ = "mesin_log"
+
     id = sa.Column(sa.Integer, primary_key=True, autoincrement=True, index=True)
-    tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"))
-    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"))
-    operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"))
+
+    # mesin and tooling can be empty when operator is doing non-mesin related activity
+    # Mulai Aktivitas Baru (bukan Mulai Aktivitas Baru dan Akhiri xyz)
+    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=True)
+    operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False)
+    tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=True)
+
+    # Current category according to the app Main Screen
+    # In main screen, we give operator list of their active activities
+    # If the operator chooses to stop an existing activity, that will be curr_category
+    curr_category = sa.Column(sa.String, nullable=True)
+
+    # Next category is the category that the operator chooses to do next
+    # This is chosen right before the POST /activity
+    next_category = sa.Column(sa.String, nullable=True)
     timestamp = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
-    output = sa.Column(sa.Integer, nullable=True)
-    downtime_category = sa.Column(sa.String, nullable=False, default="U : Utility")
-    category = sa.Column(
-        sa.Enum(MesinLogEnum, name="category"),
-        default=MesinLogEnum.START,
-        nullable=True,
-    )
-    time_created = sa.Column(
-        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
-    )
+
+    time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
+
 
 
 class ActivityMesin(Base):
+    """
+    ActivityMesin records an event.
+
+    It is created when an activity is started, with stop_id is null,
+    and then completed when the activity is done
+    (the mesin and operator is starting a diffeent event and therefore stopping previous event).
+
+    Tracks machine activities by linking a start and stop event.
+
+    - Created when a machine begins an activity (`stop_time_id = NULL` initially).
+    - Completed when the machine starts another activity (previous stop is logged).
+    - Stores production details, including output and downtime reasons.
+
+    This ensures that every activity is properly tracked and prevents
+    incorrect overlapping of machine operations.
+    """
     __tablename__ = "activity_mesin"
+
     id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
+
+    # mesin and tooling can be empty when operator is doing non-mesin related activity
+    # Mulai Aktivitas Baru (bukan Mulai Aktivitas Baru dan Akhiri xyz)
+    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=True)
     operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False)
-    start_time_id = sa.Column(
-        sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False, index=True
-    )
-    stop_time_id = sa.Column(
-        sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False, index=True
-    )
-    start_time = sa.orm.relationship(
-        "MesinLog",
-        foreign_keys=[start_time_id],
-        backref="activity_mesin_start",
-        uselist=False,
-    )
-    stop_time = sa.orm.relationship(
-        "MesinLog",
-        foreign_keys=[stop_time_id],
-        backref="activity_mesin_stop",
-        uselist=False,
-    )
+    tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=True)
+
+    category = sa.Column(sa.String, nullable=False, default="U : Utility")
+
+    # When an activity is created, there is only start time
+    start_time_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False, index=True)
+    # stop time is null when an activity is first created
+    stop_time_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=True, index=True)
+
+    start_time = sa.orm.relationship("MesinLog", foreign_keys=[start_time_id], backref="activity_mesin_start", uselist=False)
+    stop_time = sa.orm.relationship("MesinLog", foreign_keys=[stop_time_id], backref="activity_mesin_stop", uselist=False)
+
     output = sa.Column(sa.Integer, nullable=False, default=0)
     reject = sa.Column(sa.Integer, nullable=False, default=0)
     rework = sa.Column(sa.Integer, nullable=False, default=0)
+
     coil_no = sa.Column(sa.String, nullable=True)
     lot_no = sa.Column(sa.String, nullable=True)
     pack_no = sa.Column(sa.String, nullable=True)
-    downtime_category = sa.Column(sa.String, nullable=False, default="U : Utility")
-    time_created = sa.Column(
-        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
-    )
+
+    keterangan = sa.Column(sa.String, nullable=True)
+
+    time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
-
-@strawberry.enum
-class Status(Enum):
-    """Status Type"""
-
-    RUNNING = "RUNNING"
-    IDLE = "IDLE"
-    SETUP = "SETUP"
-
-
-@strawberry.enum
-class DisplayedStatus(Enum):
-    """Status to be displayed in Running Mesin All"""
-
-    RUNNING = "RUNNING"
-    IDLE = "IDLE"
-    DOWNTIME = "DOWNTIME"
-
-
-class MesinStatus(Base):
-    __tablename__ = "mesin_status"
-    id = sa.Column(
-        sa.String,
-        sa.ForeignKey("mesin.id"),
-        nullable=False,
-        primary_key=True,
-        index=True,
-    )
-    status = sa.Column(
-        sa.Enum(Status, name="status"), default=Status.IDLE, nullable=True
-    )
-    last_start_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False)
-    last_stop_id = sa.Column(sa.Integer, sa.ForeignKey("mesin_log.id"), nullable=False)
-    last_tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=False)
-    last_operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=True)
-    last_start = sa.orm.relationship(
-        "MesinLog",
-        foreign_keys=[last_start_id],
-        backref="mesin_status_start",
-        uselist=False,
-    )
-    last_stop = sa.orm.relationship(
-        "MesinLog",
-        foreign_keys=[last_stop_id],
-        backref="mesin_status_stop",
-        uselist=False,
-    )
-    last_tooling = sa.orm.relationship("Tooling", backref="curr_mesin", uselist=False)
-    last_operator = sa.orm.relationship("Operator", backref="curr_mesin", uselist=False)
-    category_downtime = sa.Column(sa.String, nullable=True)
-    displayed_status = sa.Column(
-        sa.Enum(DisplayedStatus, name="displayed_status"),
-        default=DisplayedStatus.IDLE,
-        nullable=True,
-    )
-    time_created = sa.Column(
-        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
-    )
-    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
-
-
-@strawberry.enum
-class OperatorStatusEnum(Enum):
-    """Operator Status Type"""
-
-    RUNNING = "RUNNING"
-    IDLE = "IDLE"
-
-
-class OperatorStatus(Base):
-    __tablename__ = "operator_status"
-    id = sa.Column(
-        sa.String,
-        sa.ForeignKey("operator.id"),
-        nullable=False,
-        primary_key=True,
-        index=True,
-    )
-    status = sa.Column(
-        sa.Enum(DisplayedStatus, name="operator_status_enum"),
-        default=DisplayedStatus.IDLE,
-        nullable=False,
-    )
-    last_tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=False)
-    last_mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=False)
-    last_tooling = sa.orm.relationship(
-        "Tooling", backref="curr_operator", uselist=False
-    )
-    last_mesin = sa.orm.relationship("Mesin", backref="curr_operator", uselist=False)
-    time_created = sa.Column(
-        sa.DateTime(timezone=True), server_default=sa.sql.func.now()
-    )
-    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())

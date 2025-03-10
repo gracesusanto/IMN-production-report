@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  api_dev:
+    build:
+      context: ./services/web/
+      dockerfile: Dockerfile.dev
+    container_name: api_dev
+    environment:
+      - DATABASE_URL=postgresql://dev_user:dev_password@db_dev:5432/dev_db
+    volumes:
+      - ./services/web/:/app
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db_dev
+    networks:
+      - dev_network
+
+  db_dev:
+    image: postgres:16
+    container_name: postgres_dev
+    restart: always
+    environment:
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: dev_db
+    ports:
+      - "5433:5432"  # Use 5433 locally to avoid conflicts with production
+    networks:
+      - dev_network
+
+networks:
+  dev_network:
+    driver: bridge

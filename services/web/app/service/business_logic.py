@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy import not_, or_
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
@@ -16,235 +17,65 @@ from pydantic import ValidationError
 import app.model.models as models
 import app.schema as schema
 
+# Kategori yang tidak melibatkan mesin
+# Dipakai di /operator/status supaya tidak usah menampilkan pilihan STOP untuk kategori ini
+# Dan di /activity/status supaya tidak usah menampilkan active activity mesin/operator
+NON_MACHINE_CATEGORY = ["NP : No Plan", "BT : Breaktime", "BR : Briefing"]
 
-def is_operator_running(operator_id, session):
-    operator_status = (
-        session.query(models.OperatorStatus)
-        .filter(models.OperatorStatus.id == operator_id)
-        .one_or_none()
+# Setup Category produces reject and rework
+SETUP_CATEGORY = ["TL : Trial", "TS : Tooling Setting", "TP : Tooling Problem"]
+
+# Dipakai di /activity/status supaya tidak usah menampilkan kegiatan operator yang NP
+NO_PLAN_CATEGORY = ["NP : No Plan"]
+
+def is_non_machine_category(category: str) -> bool:
+    return category in NON_MACHINE_CATEGORY
+
+def is_setup_category(category: str) -> bool:
+    return category in SETUP_CATEGORY
+
+def get_operator_active_machines(operator_id: str, exclude: list[str], session):
+    """
+    Retrieve all active machines that an operator is currently working on,
+    excluding activities where category starts with prefixes in `exclude`.
+    """
+    activities = (
+        session.query(models.ActivityMesin)
+        .filter(models.ActivityMesin.operator_id == operator_id)
+        .filter(models.ActivityMesin.stop_time_id == None)  # Only active activities
+        .filter(~models.ActivityMesin.category.in_(exclude))  # Exclude exact matches
+        .all()
     )
 
-    if operator_status is None:
-        return False, models.DisplayedStatus.IDLE, "", ""
-
-    if operator_status.status == models.DisplayedStatus.IDLE:
-        return False, operator_status.status, "", ""
-    else:
-        return (
-            True,
-            operator_status.status,
-            operator_status.last_tooling_id,
-            operator_status.last_mesin_id,
-        )
+    return activities
 
 
-def check_operator(tooling_id, mesin_id, operator_id, session):
+def get_machine_active_operators(mesin_id, exclude: list[str], session):
     """
-    Determines whether an operator is allowed to start a new activity.
-
-    The operator can start a new activity only if:
-    1. They have no ongoing activity (either running or downtime).
-    2. They are resuming the same ongoing activity.
-
-    Otherwise, it prevents the operator from starting a new one.
+    Retrieve all active operators working on the given machine,
+    excluding activities where category starts with prefixes in exclude.
     """
-
-    # Fetch the current status of the operator, if it exists
-    operator_status = (
-        session.query(models.OperatorStatus)
-        .filter(models.OperatorStatus.id == operator_id)
-        .one_or_none()
+    return (
+        session.query(models.ActivityMesin)
+        .filter(models.ActivityMesin.mesin_id == mesin_id)
+        .filter(models.ActivityMesin.stop_time_id == None)  # Only active activities
+        .filter(~models.ActivityMesin.category.in_(exclude))  # Exclude exact matches
+        .all()
     )
 
-    # If the operator does not exist in the status table, assume they are idle.
-    if operator_status is None:
-        operator_status = models.OperatorStatus(
-            id=operator_id,
-            status=models.DisplayedStatus.RUNNING,  # Setting status to RUNNING since they are starting a task
-            last_tooling_id=tooling_id,
-            last_mesin_id=mesin_id,
-        )
-        session.add(operator_status)
-        session.commit()
-        return True, ""  # Allow the new activity to proceed
 
-    # If the operator is NOT currently running, they are allowed to start a new activity.
-    # This includes cases where they are in IDLE or DOWNTIME.
-    if operator_status.status != models.DisplayedStatus.RUNNING:
-        return True, ""
-
-    # If the operator is already working on the same mesin & tooling, allow them to continue.
-    if (
-        operator_status.last_tooling_id == tooling_id
-        and operator_status.last_mesin_id == mesin_id
-    ):
-        return True, ""  # Operator is resuming the same task, so no issue.
-
-    # If the operator is already running a different activity, block them.
-    # This ensures an operator does not work on multiple machines simultaneously.
-    message = (
-        f"ERROR \nOperator {operator_id} sedang running di \n"
-        + f"Mesin:\t {operator_status.last_mesin_id} \n"
-        + f"Tooling:\t {operator_status.last_tooling_id}\n\n"
-        + f"Silahkan stop operasi di Mesin {operator_status.last_mesin_id} dan Tooling {operator_status.last_tooling_id} "
-        + "dengan kategori NP : No Planning, atau ganti operator di mesin tersebut.\n\n"
-    )
-
-    return False, message  # Operator is not allowed to start a new task until they finish the current one.
-
-
-
-def check_mesin(mesin_id, operator_id, session):
+def process_activity(activity, session):
     """
-    Determines whether an operator can use a specific mesin (machine).
+    Handles machine activity transitions based on operator input.
 
-    A machine is available if:
-    1. It is not currently running.
-    2. It is running but with the same operator who is making the request.
+    - Saves the current activity and next planned activity into `MesinLog`.
+    - Updates the previous `ActivityMesin` (if exists) by setting the stop time and saving results.
+    - Creates a new `ActivityMesin` for the next activity.
 
-    Otherwise, the request is rejected to prevent conflicting activities.
+    Ensures strict chronological tracking of machine operations and avoids overlapping activities.
     """
 
-    # Fetch the current status of the machine, if it exists
-    mesin_status = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.id == mesin_id)
-        .one_or_none()
-    )
-
-    # If the machine has no recorded status, assume it is available.
-    if mesin_status is None:
-        return True, ""  # Machine is free to use
-
-    # If the machine is NOT currently in RUNNING status, it is available.
-    # This includes IDLE (not in use) and SETUP (downtime activities).
-    if mesin_status.displayed_status != models.DisplayedStatus.RUNNING:
-        return True, ""
-
-    # If the machine is already running, but the same operator is requesting it, allow it.
-    # This prevents redundant checks when the operator is simply resuming work.
-    if mesin_status.last_operator_id == operator_id:
-        return True, ""  # The same operator is continuing the activity.
-
-    # If the machine is already in use by another operator, block access.
-    message = (
-        f"ERROR \nMesin {mesin_id} sedang running dengan detail \n"
-        + f"Operator:\t {mesin_status.last_operator_id} \n"
-        + f"Tooling:\t {mesin_status.last_tooling_id}.\n\n"
-        + "Silahkan stop mesin terlebih dahulu."
-    )
-
-    return False, message  # Machine is in use and cannot be reassigned.
-
-
-
-def start_activity(activity, session):
-    tooling_id = activity.tooling_id
-    mesin_id = activity.mesin_id
-    operator_id = activity.operator_id
-    reject = activity.reject
-    rework = activity.rework
-
-    # Insert to Start Table
-    start_entity = models.MesinLog(
-        tooling_id=tooling_id,
-        mesin_id=mesin_id,
-        operator_id=operator_id,
-        category=models.MesinLogEnum.START,
-    )
-    session.add(start_entity)
-    session.commit()
-
-    # Get current mesin status
-    mesin_status = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.id == mesin_id)
-        .one_or_none()
-    )
-    if mesin_status is None:
-        # Create mesin status, insert last stop 5 seconds before starting
-        first_stop_mesin = models.MesinLog(
-            mesin_id=mesin_id,
-            timestamp=start_entity.timestamp - timedelta(seconds=5),
-            downtime_category="Object Creation",
-            category=models.MesinLogEnum.STOP,
-        )
-        session.add(first_stop_mesin)
-        session.commit()
-
-        mesin_status = models.MesinStatus(
-            id=mesin_id,
-            status=models.Status.IDLE,
-            last_stop=first_stop_mesin,
-            last_start=start_entity,
-            last_tooling_id=tooling_id,
-            last_operator_id=operator_id,
-        )
-        session.add(mesin_status)
-
-    if mesin_status.status == models.Status.RUNNING:
-        raise HTTPException(status_code=403, detail="Machine is already running")
-
-    prev_downtime_category = mesin_status.last_stop.downtime_category
-
-    # Insert mesin's last downtime
-    last_downtime = models.ActivityMesin(
-        mesin_id=mesin_id,
-        operator_id=mesin_status.last_operator_id,
-        start_time=mesin_status.last_stop,
-        stop_time=start_entity,
-        reject=reject,
-        rework=rework,
-        downtime_category=prev_downtime_category,
-    )
-    session.add(last_downtime)
-    session.commit()
-
-    if mesin_status.last_operator_id != operator_id:
-        operator_status_old = (
-            session.query(models.OperatorStatus)
-            .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
-            .one_or_none()
-        )
-        if operator_status_old is None:
-            operator_status_old=models.OperatorStatus(
-                id=mesin_status.last_operator_id,
-                last_tooling_id=mesin_status.last_tooling_id,
-                last_mesin_id=mesin_status.id,
-            )
-            session.add(operator_status_old)
-            session.commit()
-        operator_status_old.status = models.DisplayedStatus.IDLE
-
-    operator_status_new = (
-        session.query(models.OperatorStatus)
-        .filter(models.OperatorStatus.id == operator_id)
-        .one_or_none()
-    )
-    if operator_status_new is None:
-        operator_status_new = models.OperatorStatus(
-            id=operator_id,
-            last_tooling_id=tooling_id,
-            last_mesin_id=mesin_id,
-        )
-        session.add(operator_status_new)
-        session.commit()
-
-    operator_status_new.last_tooling_id = tooling_id
-    operator_status_new.last_mesin_id = mesin_id
-    operator_status_new.status = models.DisplayedStatus.RUNNING
-
-    # Update mesin's status and last start
-    mesin_status.status = models.Status.RUNNING
-    mesin_status.last_start = start_entity
-    mesin_status.last_tooling_id = tooling_id
-    mesin_status.last_operator_id = operator_id
-    mesin_status.category_downtime = "U : Utility"
-    mesin_status.displayed_status = models.DisplayedStatus.RUNNING
-    session.commit()
-
-
-def first_stop_activity(activity, session):
+    # Empty tooling and mesin means user choose: Mulai Aktivitas Baru and then pick NP / BR / BT (non machine activity)
     tooling_id = activity.tooling_id
     mesin_id = activity.mesin_id
     operator_id = activity.operator_id
@@ -254,227 +85,135 @@ def first_stop_activity(activity, session):
     coil_no = activity.coil_no
     lot_no = activity.lot_no
     pack_no = activity.pack_no
-    downtime_category = activity.category_downtime
+    keterangan = activity.keterangan
+    curr_category = activity.curr_category
+    next_category = activity.next_category
 
-    # Insert to Stop Table
-    stop_entity = models.MesinLog(
-        tooling_id=tooling_id,
+    print(mesin_id)
+    print(tooling_id)
+    print(curr_category)
+
+    # Step 1: Insert new MesinLog entry
+    new_log = models.MesinLog(
         mesin_id=mesin_id,
         operator_id=operator_id,
-        output=output,
-        downtime_category=downtime_category,
-        category=models.MesinLogEnum.STOP,
-    )
-    session.add(stop_entity)
-    session.commit()
-
-    # Get current mesin status
-    mesin_status = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.id == mesin_id)
-        .one_or_none()
-    )
-    if mesin_status is None:
-        # Create mesin status, insert last start 5 seconds before stopping
-        first_start_mesin = models.MesinLog(
-            mesin_id=mesin_id,
-            timestamp=stop_entity.timestamp - timedelta(seconds=5),
-            category=models.MesinLogEnum.START,
-        )
-        session.add(first_start_mesin)
-        session.commit()
-
-        mesin_status = models.MesinStatus(
-            id=mesin_id,
-            status=models.Status.RUNNING,
-            last_stop=stop_entity,
-            last_start=first_start_mesin,
-            last_tooling_id=tooling_id,
-            last_operator_id=operator_id,
-        )
-        session.add(mesin_status)
-
-    if mesin_status.status != models.Status.RUNNING:
-        raise HTTPException(status_code=403, detail="Machine is already idle")
-
-    # Insert mesin's utility table
-    utility = models.ActivityMesin(
-        mesin_id=mesin_id,
-        operator_id=mesin_status.last_operator_id,
-        start_time=mesin_status.last_start,
-        stop_time=stop_entity,
-        output=output,
-        reject=reject,
-        rework=rework,
-        coil_no=coil_no,
-        lot_no=lot_no,
-        pack_no=pack_no,
-    )
-    session.add(utility)
-    session.commit()
-
-    displayed_status = _get_displayed_status(downtime_category)
-
-    if (mesin_status.last_operator_id != operator_id) or (
-        mesin_status.last_operator_id == operator_id
-        and displayed_status == models.DisplayedStatus.IDLE
-    ):
-        operator_status_old = (
-            session.query(models.OperatorStatus)
-            .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
-            .one_or_none()
-        )
-        if operator_status_old is None:
-            operator_status_old=models.OperatorStatus(
-                id=mesin_status.last_operator_id,
-                last_tooling_id=mesin_status.last_tooling_id,
-                last_mesin_id=mesin_status.id,
-            )
-            session.add(operator_status_old)
-            session.commit()
-        operator_status_old.status = models.DisplayedStatus.IDLE
-
-    operator_status_new = (
-        session.query(models.OperatorStatus)
-        .filter(models.OperatorStatus.id == operator_id)
-        .one_or_none()
-    )
-    if operator_status_new is None:
-        operator_status_new = models.OperatorStatus(
-            id=operator_id,
-            last_tooling_id=tooling_id,
-            last_mesin_id=mesin_id,
-        )
-        session.add(operator_status_new)
-        session.commit()
-
-    operator_status_new.last_tooling_id = tooling_id
-    operator_status_new.last_mesin_id = mesin_id
-    operator_status_new.status = displayed_status
-
-    # Update mesin's status and last stop
-    mesin_status.status = _update_downtime_mesin_status(downtime_category)
-    mesin_status.last_stop = stop_entity
-    mesin_status.last_tooling_id = tooling_id
-    mesin_status.last_operator_id = operator_id
-    mesin_status.category_downtime = downtime_category
-
-    mesin_status.displayed_status = displayed_status
-
-    session.commit()
-
-
-def continue_stop_activity(activity, session):
-    tooling_id = activity.tooling_id
-    mesin_id = activity.mesin_id
-    operator_id = activity.operator_id
-    reject = activity.reject
-    rework = activity.rework
-    downtime_category = activity.category_downtime
-
-    # Insert to Stop Table
-    stop_entity = models.MesinLog(
         tooling_id=tooling_id,
+        curr_category=curr_category,
+        next_category=next_category,
+    )
+    session.add(new_log)
+    session.commit()
+
+    # Step 2: Stop any NP activity
+    np_activities = (
+    session.query(models.ActivityMesin)
+        .filter(
+            models.ActivityMesin.operator_id == operator_id,
+            models.ActivityMesin.stop_time_id.is_(None),  # Only active activities
+            models.ActivityMesin.category.startswith("NP")  # Only NP activities
+        )
+        .all()
+    )
+
+    # Stop NP activities by setting their stop_time_id
+    if np_activities:
+        for np_activity in np_activities:
+            np_activity.stop_time_id = new_log.id  # Use new log entry to mark the stop
+        session.commit()
+
+    # Step 3: Find the previous ongoing ActivityMesin entry
+    # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
+    # So for those, no need to filter by mesin
+    activities_to_stop_query = (
+        session.query(models.ActivityMesin)
+        .filter(
+            models.ActivityMesin.operator_id == operator_id,
+            models.ActivityMesin.category == curr_category,
+            models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
+        )
+    )
+
+    # If it's NOT a non-machine category, further filter by mesin_id
+    if curr_category and curr_category not in NON_MACHINE_CATEGORY:
+        activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.mesin_id == mesin_id)
+
+    activities_to_stop = activities_to_stop_query.all()
+
+    # Stop all selected activities
+    if activities_to_stop:
+        for activity in activities_to_stop:
+            activity.stop_time_id = new_log.id
+            activity.output = output
+            activity.reject = reject
+            activity.rework = rework
+            activity.coil_no = coil_no
+            activity.lot_no = lot_no
+            activity.pack_no = pack_no
+            activity.keterangan = keterangan
+
+        session.commit()
+
+    # Step 4: Create a new ActivityMesin entry for the next activity
+    new_activity = models.ActivityMesin(
         mesin_id=mesin_id,
         operator_id=operator_id,
-        downtime_category=downtime_category,
-        category=models.MesinLogEnum.STOP,
+        tooling_id=tooling_id,
+        category=next_category,
+        start_time_id=new_log.id,  # Set this new log as the start time
+        stop_time_id=None,  # It has just started, so stop time remains NULL
     )
-    session.add(stop_entity)
+    session.add(new_activity)
     session.commit()
 
-    # Get current mesin status
-    mesin_status = (
-        session.query(models.MesinStatus)
-        .filter(models.MesinStatus.id == mesin_id)
-        .one_or_none()
+
+def _determine_new_mesin_status(downtime_category):
+    """
+    Determines the machine's next operational state after a stop event.
+
+    Business Justification:
+    - **SETUP**: If the downtime is related to tooling (`TL` - Trial, `TS` - Tooling Setting, `TP` - Tooling Problem),
+      the machine transitions to `SETUP`. This allows operators to log reject/rework before resuming production.
+    - **IDLE**: For all other downtime reasons, the machine transitions to `IDLE`, indicating that it is
+      available but not actively running.
+
+    Why is this necessary?
+    - Prevents machines that are being prepared for production from appearing as fully stopped.
+    - Ensures that only **tooling-related downtime** moves to `SETUP`, keeping production downtime separate.
+
+    :param downtime_category: The category of downtime that caused the machine to stop.
+    :return: The new `MesinStatus` (`SETUP` or `IDLE`).
+    """
+    downtime_category_initial = _get_downtime_category(downtime_category)
+
+    return models.Status.SETUP if downtime_category_initial in ["TL", "TS", "TP"] else models.Status.IDLE
+
+
+def _get_displayed_status(downtime_category):
+    """
+    Determines the correct displayed status for the operator based on the downtime category.
+
+    Business Justification:
+    - **IDLE**: If the downtime category is `NP` (No Plan), `BT` (Breaktime), or `BR` (Briefing),
+      the operator is not actively working and should be marked as idle.
+    - **DOWNTIME**: For all other downtime reasons, the operator is actively handling an issue,
+      so they should be displayed as in **downtime**.
+
+    Why is this necessary?
+    - Ensures that **planned non-working periods (breaks, briefings, no plan)** are not mistakenly marked as downtime.
+    - Prevents confusion between **actual production downtime** (e.g., Machine Problem, Change Material)
+      and scheduled non-working time.
+
+    :param downtime_category: The category of downtime affecting the machine.
+    :return: The new `DisplayedStatus` (`IDLE` or `DOWNTIME`).
+    """
+    downtime_category_initial = _get_downtime_category(downtime_category)
+
+    return (
+        models.DisplayedStatus.IDLE
+        if downtime_category_initial in ["NP", "BT", "BR"]
+        else models.DisplayedStatus.DOWNTIME
     )
-    if mesin_status is None:
-        # Create mesin status, insert last start 5 seconds before stopping
-        first_start_mesin = models.MesinLog(
-            mesin_id=mesin_id,
-            timestamp=stop_entity.timestamp - timedelta(seconds=5),
-            category=models.MesinLogEnum.START,
-        )
-        session.add(first_start_mesin)
-        session.commit()
 
-        mesin_status = models.MesinStatus(
-            id=mesin_id,
-            status=models.Status.IDLE,
-            last_stop=stop_entity,
-            last_start=first_start_mesin,
-            last_tooling_id=tooling_id,
-            last_operator_id=operator_id,
-        )
-        session.add(mesin_status)
-
-    if mesin_status.status == models.Status.RUNNING:
-        raise HTTPException(status_code=403, detail="Machine is not running")
-
-    prev_downtime_category = mesin_status.last_stop.downtime_category
-
-    # Insert mesin's continued downtime table
-    continued_downtime = models.ActivityMesin(
-        mesin_id=mesin_id,
-        operator_id=mesin_status.last_operator_id,
-        start_time=mesin_status.last_stop,
-        stop_time=stop_entity,
-        reject=reject,
-        rework=rework,
-        downtime_category=prev_downtime_category,
-    )
-    session.add(continued_downtime)
-    session.commit()
-
-    displayed_status = _get_displayed_status(downtime_category)
-
-    if (mesin_status.last_operator_id != operator_id) or (
-        mesin_status.last_operator_id == operator_id
-        and displayed_status == models.DisplayedStatus.IDLE
-    ):
-        operator_status_old = (
-            session.query(models.OperatorStatus)
-            .filter(models.OperatorStatus.id == mesin_status.last_operator_id)
-            .one_or_none()
-        )
-        if operator_status_old is None:
-            operator_status_old=models.OperatorStatus(
-                id=mesin_status.last_operator_id,
-                last_tooling_id=mesin_status.last_tooling_id,
-                last_mesin_id=mesin_status.id,
-            )
-            session.add(operator_status_old)
-            session.commit()
-        operator_status_old.status = models.DisplayedStatus.IDLE
-
-    operator_status_new = (
-        session.query(models.OperatorStatus)
-        .filter(models.OperatorStatus.id == operator_id)
-        .one_or_none()
-    )
-    if operator_status_new is None:
-        operator_status_new = models.OperatorStatus(
-            id=operator_id,
-            last_tooling_id=tooling_id,
-            last_mesin_id=mesin_id,
-        )
-        session.add(operator_status_new)
-        session.commit()
-    operator_status_new.last_tooling_id = tooling_id
-    operator_status_new.last_mesin_id = mesin_id
-    operator_status_new.status = displayed_status
-
-    # Update mesin's status and last stop
-    mesin_status.status = _update_downtime_mesin_status(downtime_category)
-    mesin_status.last_stop = stop_entity
-    mesin_status.last_tooling_id = tooling_id
-    mesin_status.last_operator_id = operator_id
-    mesin_status.category_downtime = downtime_category
-
-    mesin_status.displayed_status = displayed_status
-
-    session.commit()
 
 
 def insert_or_update_tooling(
@@ -788,13 +527,4 @@ def _update_downtime_mesin_status(downtime_category):
         models.Status.SETUP
         if _get_downtime_category(downtime_category) in ["TP", "TS", "TL"]
         else models.Status.IDLE
-    )
-
-
-def _get_displayed_status(downtime_category):
-    downtime_category_initial = _get_downtime_category(downtime_category)
-    return (
-        models.DisplayedStatus.IDLE
-        if downtime_category_initial in ["NP", "BT", "BR"]
-        else models.DisplayedStatus.DOWNTIME
     )

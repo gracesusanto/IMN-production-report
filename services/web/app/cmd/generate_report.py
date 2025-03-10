@@ -3,7 +3,8 @@ from datetime import datetime, time, timedelta
 from enum import Enum
 import calendar
 
-import pandas
+import numpy as np
+import pandas as pd
 import sqlalchemy as sa
 from sqlalchemy.orm import aliased
 import pytz
@@ -17,7 +18,7 @@ All timezone-aware dates and times are stored internally in UTC.
 They are converted to local time in the zone specified by
 the timezone configuration parameter before being displayed to the client.
 """
-_TIMEZONE = pytz.timezone("Asia/Jakarta")
+_JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
 
 _WORKING_SHIFT_JSON = {
     "Saturday": {"start": {"1": 7, "2": 12, "3": 17}, "duration": 5},
@@ -27,7 +28,7 @@ _WORKING_SHIFT_JSON = {
 
 def _is_time_between(begin_time, end_time, check_time=None):
     # If check time is not given, default to current timezone time
-    check_time = check_time or datetime.now(_TIMEZONE).time()
+    check_time = check_time or datetime.now(_JAKARTA_TZ).time()
     if begin_time < end_time:
         return check_time >= begin_time and check_time < end_time
     else:  # crosses midnight
@@ -61,11 +62,11 @@ def _calculate_shift_from_datetime(date_time):
 
 
 def get_curr_datetime():
-    return datetime.now(_TIMEZONE).date()
+    return datetime.now(_JAKARTA_TZ).date()
 
 
 def get_curr_shift():
-    return _calculate_shift_from_datetime(datetime.now(_TIMEZONE))
+    return _calculate_shift_from_datetime(datetime.now(_JAKARTA_TZ))
 
 
 def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
@@ -139,7 +140,7 @@ def _fill_default_datetime(
 ):
     # Fill None dates with today's date
     if date_from is None and date_to is None:
-        date_from = date_to = datetime.now(_TIMEZONE)
+        date_from = date_to = datetime.now(_JAKARTA_TZ)
     elif date_from is None:
         date_from = date_to
     elif date_to is None:
@@ -191,27 +192,31 @@ def _get_month_range(year=None, month=None):
     return first_day, last_day, year, month
 
 def _generate_keterangan(row):
-    keterangan = (
-        (f"Coil No: {row['Coil No']}, " if row["Coil No"] else "")
-        + (f"Lot No: {row['Lot No']}, " if row["Lot No"] else "")
-        + (f"Pack No: {row['Pack No']}" if row["Pack No"] else "")
-    )
+    """
+    Generates a description string based on available Keterangan, Coil No, Lot No, and Pack No.
+    Ensures the result does not contain unnecessary trailing commas.
+    """
+    fields = [
+        f"Keterangan: {row['Keterangan']}" if row["Keterangan"] else "",
+        f"Coil No: {row['Coil No']}" if row["Coil No"] else "",
+        f"Lot No: {row['Lot No']}" if row["Lot No"] else "",
+        f"Pack No: {row['Pack No']}" if row["Pack No"] else "",
+    ]
 
-    if keterangan[-2::] == ", ":
-        keterangan = keterangan[:-2]
-    return keterangan
+    return ", ".join(filter(None, fields))  # Filters out empty strings
 
 
 def _generate_keterangan_limax(row):
-    keterangan = (f"Reject: {row['Reject']}, " if row["Reject"] else "") + (
-        f"Rework: {row['Rework']}, " if row["Rework"] else ""
-    )
+    """
+    Extends _generate_keterangan by adding Reject and Rework details.
+    Ensures that the generated description does not contain unnecessary trailing commas.
+    """
+    fields = [
+        f"Reject: {row['Reject']}" if row["Reject"] else "",
+        f"Rework: {row['Rework']}" if row["Rework"] else "",
+    ]
 
-    keterangan += _generate_keterangan(row)
-
-    if keterangan[-2::] == ", ":
-        keterangan = keterangan[:-2]
-    return keterangan
+    return ", ".join(filter(None, fields + [_generate_keterangan(row)]))  # Concatenates and filters
 
 
 def _format_time_for_limax(time):
@@ -260,24 +265,23 @@ def _filter_df(df, filters):
             conditions.append(df[field] >= filter_condition.gt)
 
     if conditions:
-        overall_condition = pandas.concat(conditions, axis=1).all(axis=1)
+        overall_condition = pd.concat(conditions, axis=1).all(axis=1)
         df = df[overall_condition]
 
     return df
 
 
-def query_activity_mesin(time_from, time_to, pagination):
+def query_activity_mesin(time_from, time_to):
+    """
+    Query activity records from mesin_log and activity_mesin tables.
+    Fetches start/stop times, operators, tooling, and machine info.
+    """
     activity_start = aliased(models.MesinLog)
     activity_stop = aliased(models.MesinLog)
 
     query = (
-        session.query(models.ActivityMesin)
-        .join(models.Mesin)
-        .join(activity_start, models.ActivityMesin.start_time)
-        .join(activity_stop, models.ActivityMesin.stop_time)
-        .join(models.Operator, models.Operator.id == activity_start.operator_id)
-        .join(models.Tooling, models.Tooling.id == activity_start.tooling_id)
-        .with_entities(
+        session.query(
+            models.ActivityMesin.id,
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
             models.Operator.nik.label("NIK"),
@@ -288,134 +292,183 @@ def query_activity_mesin(time_from, time_to, pagination):
             models.Tooling.std_jam.label("Target"),
             activity_start.timestamp.label("Start"),
             activity_stop.timestamp.label("Stop"),
-            models.ActivityMesin.downtime_category.label("Desc"),
+            models.ActivityMesin.category.label("Desc"),
             models.ActivityMesin.output.label("Qty"),
             models.ActivityMesin.reject.label("Reject"),
             models.ActivityMesin.rework.label("Rework"),
             models.ActivityMesin.coil_no.label("Coil No"),
             models.ActivityMesin.lot_no.label("Lot No"),
             models.ActivityMesin.pack_no.label("Pack No"),
+            models.ActivityMesin.keterangan.label("Keterangan"),
         )
+        .outerjoin(models.Mesin, models.ActivityMesin.mesin_id == models.Mesin.id)
+        .join(activity_start, models.ActivityMesin.start_time)
+        .outerjoin(activity_stop, models.ActivityMesin.stop_time)
+        .join(models.Operator, models.Operator.id == activity_start.operator_id)
+        .outerjoin(models.Tooling, models.Tooling.id == activity_start.tooling_id)
         .filter(activity_start.timestamp >= time_from)
         .filter(activity_start.timestamp < time_to)
+        .filter(models.ActivityMesin.stop_time_id.isnot(None))
         .order_by(models.Mesin.name.asc(), activity_start.timestamp.asc())
     )
 
-    if pagination is not None:
-        query = query.offset((pagination.page - 1) * pagination.page_size).limit(
-            pagination.page_size
-        )
-
     result = session.execute(query)
-    df = pandas.DataFrame(result.fetchall(), columns=result.keys())
+    df = pd.DataFrame(result.fetchall(), columns=result.keys())
 
-    df["Coil No"] = df["Coil No"].fillna("").replace("-", "")
-    df["Lot No"] = df["Lot No"].fillna("").replace("-", "")
-    df["Pack No"] = df["Pack No"].fillna("").replace("-", "")
-    df["Keterangan"] = df.apply(lambda row: _generate_keterangan(row), axis=1)
-    df["Keterangan Limax"] = df.apply(
-        lambda row: _generate_keterangan_limax(row), axis=1
-    )
-    df.drop(["Coil No", "Lot No", "Pack No"], axis=1)
+    if df.empty:
+        expected_columns = [
+            "MC", "Operator", "NIK", "Kode Tooling", "Common Tooling Name",
+            "Part No", "Part Name", "Target", "Start", "Stop", "Desc",
+            "Qty", "Reject", "Rework", "Coil No", "Lot No", "Pack No", "Keterangan"
+        ]
+        df = pd.DataFrame(columns=expected_columns)
+
+    # Ensure default values for missing fields
+    for col in ["Coil No", "Lot No", "Pack No", "Keterangan"]:
+        df[col] = df[col].fillna("").replace("-", "")
+
+    df["Keterangan"] = df.apply(_generate_keterangan, axis=1)
+    df["Keterangan Limax"] = df.apply(_generate_keterangan_limax, axis=1)
+
+    df.drop(["Coil No", "Lot No", "Pack No"], axis=1, inplace=True)
+
     return df
 
-def df_to_report(df, report_category, filters, sort):
-    df["Tanggal"] = (
-        pandas.to_datetime(df.Start, utc=True)
-        .map(lambda x: x.tz_convert("Asia/Jakarta"))
-        .dt.strftime("%d/%m/%Y")
-    )
-    df["StartTime"] = (
-        pandas.to_datetime(df.Start, utc=True)
-        .map(lambda x: x.tz_convert("Asia/Jakarta"))
-        .dt.strftime("%H:%M:%S")
+def _convert_to_jakarta_time(timestamp, fmt="%m/%d/%Y %H:%M:%S"):
+    """Converts UTC timestamp to Jakarta time and formats it."""
+    return (
+        pd.to_datetime(timestamp, utc=True)
+        .map(lambda x: x.tz_convert(_JAKARTA_TZ))
+        .dt.strftime(fmt)
     )
 
-    df["Start"] = (
-        pandas.to_datetime(df.Start, utc=True)
-        .map(lambda x: x.tz_convert("Asia/Jakarta"))
-        .dt.strftime("%m/%d/%Y %H:%M:%S")
-    )
-    df["Stop"] = (
-        pandas.to_datetime(df.Stop, utc=True)
-        .map(lambda x: x.tz_convert("Asia/Jakarta"))
-        .dt.strftime("%m/%d/%Y %H:%M:%S")
-    )
+def _format_percent(value):
+    """Formats percentage values to two decimal places."""
+    return f"{value:.2f}%"
+
+def _insert_missing_records(df):
+    """Handles missing 'Not Known' (NK) records for operator reports."""
+    df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
+
+    for index in range(1, len(df)):
+        same_operator = df.loc[index, "Operator"] == df.loc[index - 1, "Operator"]
+        start_mismatch = df.loc[index, "Start"] != df.loc[index - 1, "Stop"]
+
+        # Insert NK when there's a gap, excluding No Plan (NP) and Break Time (BT)
+        if same_operator and start_mismatch and df.loc[index, "Desc"][:2] not in ["NP", "BT"]:
+            insert_row = {
+                "Operator": df.loc[index]["Operator"],
+                "Start": df.loc[index - 1]["Stop"],
+                "Stop": df.loc[index]["Start"],
+                "Desc": "NK : Not Known",
+            }
+            df = pd.concat([df, pd.DataFrame([insert_row])])
+
+        # Ensure previous stop matches next start
+        if same_operator and start_mismatch:
+            df.loc[index - 1, "Stop"] = df.loc[index]["Start"]
+
+    return df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
+
+def df_to_report(df, report_category, filters, sort):
+    """Transforms the raw DataFrame into a structured report format."""
+    df["Tanggal"] = _convert_to_jakarta_time(df.Start, "%d/%m/%Y")
+    df["StartTime"] = _convert_to_jakarta_time(df.Start, "%H:%M:%S")
+    df["StopTime"] = _convert_to_jakarta_time(df.Stop, "%H:%M:%S")
+    df["Start"] = _convert_to_jakarta_time(df.Start)
+    df["Stop"] = _convert_to_jakarta_time(df.Stop)
     df["Shift"] = df["Start"].apply(lambda x: _calculate_shift(x))
 
     if report_category == ReportCategory.OPERATOR:
-        df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
-        for index, _ in df.iterrows():
-            if index == 0:
-                continue
+        df.drop(df[df["Desc"] == "NP : No Plan"].index, inplace=True)
 
-            # Remove No Plan and BreakTime from Operator's Downtime
-            if (
-                (df.loc[index]["Operator"] == df.loc[index - 1]["Operator"])
-                and (df.loc[index]["Start"] != df.loc[index - 1]["Stop"])
-                and (
-                    df.loc[index]["Desc"][:2] != "NP"
-                    and df.loc[index]["Desc"][:2] != "BT"
-                )
-            ):
-                insert_row = {
-                    "Operator": df.loc[index]["Operator"],
-                    "Start": df.loc[index - 1]["Stop"],
-                    "Stop": df.loc[index]["Start"],
-                    "Desc": "NK : Not Known",
-                }
-                df = pandas.concat([df, pandas.DataFrame([insert_row])])
+    # Operator BT and BR are non mesin and tooling related downtime
+    # So the MC and Tooling are `0`
+    columns_to_replace = [
+        "MC", "Kode Tooling", "Common Tooling Name", "Part No", "Part Name"
+    ]
+    df.loc[:, columns_to_replace] = df.loc[:, columns_to_replace].replace([0, None, np.nan], "-")
 
-            if (df.loc[index]["Operator"] == df.loc[index - 1]["Operator"]) and (
-                df.loc[index]["Start"] != df.loc[index - 1]["Stop"]
-            ):
-                df.loc[index - 1, "Stop"] = df.loc[index]["Start"]
+    if report_category == ReportCategory.MESIN:
+        df = df[df["MC"] != "-"]  # Remove empty machine entries
 
-        df.drop(df.loc[df["Desc"] == "NP : No Plan"].index, inplace=True)
-        df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
+    # Compute and format duration
+    df["Duration"] = (pd.to_datetime(df.Stop) - pd.to_datetime(df.Start)).dt.total_seconds()
+    df["Duration"] = df["Duration"].apply(_convert_seconds)
 
-    df = df[df["MC"].notna()]
-
-    df["StopTime"] = pandas.to_datetime(df.Stop).dt.strftime("%H:%M:%S")
-
-    df["Duration"] = pandas.to_datetime(df.Stop) - pandas.to_datetime(df.Start)
-    df["Duration"] = df["Duration"].dt.total_seconds()
+    # Compute key metrics
     df["Productivity"] = df.apply(_calculate_productivity, axis=1)
-    df["Duration"] = df["Duration"].apply(lambda x: _convert_seconds(x))
-
-    df = df.fillna(0)
-    df["Qty"] = df["Qty"].astype(int)
-    df["Reject"] = df["Reject"].astype(int)
-    df["Rework"] = df["Rework"].astype(int)
-
     df["Reject Ratio"] = df.apply(_calculate_ratio, type="Reject", axis=1)
     df["Rework Ratio"] = df.apply(_calculate_ratio, type="Rework", axis=1)
 
-    sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
-    sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
+    # Convert percentages to formatted strings
+    df["Productivity"] = df["Productivity"].map(_format_percent)
+    df["Reject Ratio"] = df["Reject Ratio"].map(_format_percent)
+    df["Rework Ratio"] = df["Rework Ratio"].map(_format_percent)
 
-    # Filter while Productivity and Ratios are still in the form of float
-    if filters is not None:
+    # Fill missing values with 0 and convert numeric columns
+    df = df.fillna(0)
+    df[["Qty", "Reject", "Rework"]] = df[["Qty", "Reject", "Rework"]].astype(int)
+
+    # Sorting logic
+    primary_sort = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
+
+    if filters:
         df = _filter_df(df, filters)
+
     if sort:
-        # print(sort.sort_by, sort.direction)
-        df = df.sort_values(
-            by=[sort.sort_by], ascending=(sort.direction == "ascending")
-        )
+        df = df.sort_values(by=[sort.sort_by], ascending=(sort.direction == "ascending"))
     else:
-        df = df.sort_values(by=[sort_by_first, "Start"]).reset_index(drop=True)
+        df = df.sort_values(by=[primary_sort, "Start"]).reset_index(drop=True)
 
-    df["Productivity"] = df["Productivity"].map(lambda x: f"{x:.2f}%")
-    df["Reject Ratio"] = df["Reject Ratio"].map(lambda x: f"{x:.2f}%")
-    df["Rework Ratio"] = df["Rework Ratio"].map(lambda x: f"{x:.2f}%")
-
-    df["Plant"] = df["MC"].apply(lambda MC: MC[-1])
+    # Additional columns
+    df["Plant"] = df["MC"].apply(lambda mc: mc[-1])
     df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
     df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
-    df["Kode Keterangan"] = df["Desc"].apply(lambda Desc: Desc[0:2].strip())
 
-    df.drop(["Start", "Stop"], axis=1, inplace=True)
+    df["Kode Keterangan"] = df["Desc"].apply(lambda desc: desc[:2].strip())
+
+    df.drop(columns=["Start", "Stop"], inplace=True)
+
     return df
+
+def merge_consecutive_downtime(df, report_category):
+    """
+    Merge consecutive downtime events that belong to the same machine (for mesin report)
+    or the same operator (for operator report) with the same category (Desc).
+
+    - Takes the **earliest StartTime** and **latest StopTime** for consecutive entries.
+    - Works only when there is a downtime event (`Desc` is the same).
+    """
+
+    # Determine which column to use for grouping (MC for mesin, Operator for operator)
+    group_col = "MC" if report_category == ReportCategory.MESIN else "Operator"
+
+    # Sort by the grouping column and start time
+    df = df.sort_values(by=[group_col, "StartTime"]).reset_index(drop=True)
+
+    merged_rows = []
+    prev_row = None
+
+    for _, row in df.iterrows():
+        if prev_row is not None:
+            # Check if the downtime (Desc) and group_col (MC or Operator) are the same as previous
+            if row[group_col] == prev_row[group_col] and row["Desc"] == prev_row["Desc"]:
+                # Update the previous row's StopTime to the latest one
+                prev_row["StopTime"] = max(prev_row["StopTime"], row["StopTime"])
+                continue  # Skip adding a new row, just update previous
+
+        # If the condition is not met, append the previous row to the final list
+        if prev_row is not None:
+            merged_rows.append(prev_row)
+
+        prev_row = row.copy()  # Move to next row
+
+    # Append the last processed row
+    if prev_row is not None:
+        merged_rows.append(prev_row)
+
+    return pd.DataFrame(merged_rows)
 
 class ReportCategory(Enum):
     MESIN = "mesin"
@@ -446,8 +499,12 @@ def get_report(
     if ("limax" in format.value) or (is_backup == True) :
         pagination = filters = sort = None
 
-    df = query_activity_mesin(time_from, time_to, pagination)
+    df = query_activity_mesin(time_from, time_to)
     df = df_to_report(df, report_category, filters, sort)
+    df = merge_consecutive_downtime(df, report_category)
+
+    if pagination:
+        df = df.iloc[(pagination.page - 1) * pagination.page_size : pagination.page * pagination.page_size]
 
     sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
     sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
