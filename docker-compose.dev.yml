@@ -6,6 +6,7 @@ services:
       context: ./services/web/
       dockerfile: Dockerfile.dev
     container_name: api_dev
+    restart: always
     environment:
       - DATABASE_URL=postgresql://dev_user:dev_password@db_dev:5432/dev_db
     volumes:
