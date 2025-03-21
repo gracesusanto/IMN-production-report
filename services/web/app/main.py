@@ -150,12 +150,14 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
 
     mesin_id = request.mesin_id
     operator_id = request.operator_id
+    tooling_id = request.tooling_id
     curr_category = request.curr_category
 
     active_activities = (
         session.query(models.ActivityMesin)
         .filter(models.ActivityMesin.mesin_id == mesin_id)
         .filter(models.ActivityMesin.operator_id == operator_id)
+        .filter(models.ActivityMesin.tooling_id == tooling_id)
         .filter(models.ActivityMesin.stop_time_id == None)  # Only active activities
         .all()
     )
@@ -169,7 +171,7 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
             # mesin only matters on machine-related categories
             # So it is okay to have multiple NP/BR/BT ongoing activities
             if not business_logic.is_non_machine_category(active_activity.category):
-                error = f"Operator {operator_id} sedang menjalankan {active_activity.category} pada mesin {mesin_id}."
+                error = f"Operator {operator_id} sedang menjalankan {active_activity.category} pada mesin {mesin_id} dan tooling {tooling_id}."
                 break
 
     # Get all operator's current active activities
@@ -203,17 +205,20 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
     # List all operators currently running the machine
     operators_on_machine = []
     for activity in active_machine_activities:
-        if not (activity.operator_id == request.operator_id and activity.category == curr_category):
+        # List of "Operator lain yang sedang menjalankan mesin ini"
+        # Make sure we dont return our own activity
+        if (not (activity.operator_id == request.operator_id and activity.category == curr_category) and activity.operator_id != request.operator_id):
             operators_on_machine.append({"operator_id": activity.operator_id, "tooling_id": activity.tooling_id or "", "category": activity.category or ""})
 
     # List all machines currently operated by this operator
     machines_by_operator = []
     for activity in active_operator_activities:
+        # List of "Anda sedang menjalankan mesin lain"
         if not (activity.mesin_id == request.mesin_id and activity.category == curr_category):
             machines_by_operator.append({"mesin_id": activity.mesin_id or "", "tooling_id": activity.tooling_id or "", "category": activity.category or ""})
 
     return {
-        "error": error,                 # Prevent operator from creating another entry on the same machine that he is currently active on
+        "error": error,                 # Prevent operator from creating another entry on the same machine and tooling that he is currently active on
         "mesin_status": mesin_status,   # Used in ConfirmScreen to determine navigation
         "operators_on_machine": operators_on_machine, # List of operators running on submitted mesin
         "machines_by_operator": machines_by_operator, # List of mesin the submitted operator is running at

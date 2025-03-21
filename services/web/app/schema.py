@@ -148,6 +148,7 @@ class ReportRequest(BaseModel):
 class ActivityStatusRequest(BaseModel):
     mesin_id: str
     operator_id: str
+    tooling_id: str
     curr_category: str  # curr_category is to return RUNNING/IDLE/SETUP for ConfirmScreen next screen. Should ideally be in a separate request
 
 class ReportBackupRequest(BaseModel):
