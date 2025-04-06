@@ -137,6 +137,9 @@ def process_activity(activity, session):
     if curr_category and curr_category not in NON_MACHINE_CATEGORY:
         activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.mesin_id == mesin_id)
 
+        if tooling_id:
+            activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.tooling_id == tooling_id)
+
     activities_to_stop = activities_to_stop_query.all()
 
     # Stop all selected activities
