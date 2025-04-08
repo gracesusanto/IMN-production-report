@@ -285,6 +285,7 @@ def query_activity_mesin(time_from, time_to):
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
             models.Operator.nik.label("NIK"),
+            models.Tooling.id.label("Tooling"),
             models.Tooling.kode_tooling.label("Kode Tooling"),
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
             models.Tooling.part_no.label("Part No"),
@@ -317,7 +318,7 @@ def query_activity_mesin(time_from, time_to):
 
     if df.empty:
         expected_columns = [
-            "MC", "Operator", "NIK", "Kode Tooling", "Common Tooling Name",
+            "MC", "Operator", "NIK", "Tooling", "Kode Tooling", "Common Tooling Name",
             "Part No", "Part Name", "Target", "Start", "Stop", "Desc",
             "Qty", "Reject", "Rework", "Coil No", "Lot No", "Pack No", "Keterangan"
         ]
@@ -385,7 +386,7 @@ def df_to_report(df, report_category, filters, sort):
     # Operator BT and BR are non mesin and tooling related downtime
     # So the MC and Tooling are `0`
     columns_to_replace = [
-        "MC", "Kode Tooling", "Common Tooling Name", "Part No", "Part Name"
+        "MC", "Tooling", "Kode Tooling", "Common Tooling Name", "Part No", "Part Name"
     ]
     df.loc[:, columns_to_replace] = df.loc[:, columns_to_replace].replace([0, None, np.nan], "-")
 
@@ -453,7 +454,7 @@ def merge_consecutive_downtime(df, report_category):
     for _, row in df.iterrows():
         if prev_row is not None:
             # Check if the downtime (Desc) and group_col (MC or Operator) are the same as previous
-            if row[group_col] == prev_row[group_col] and row["Desc"] == prev_row["Desc"]:
+            if row[group_col] == prev_row[group_col] and row["Desc"] == prev_row["Desc"] and row["Tooling"] == prev_row["Tooling"]:
                 # Update the previous row's StopTime to the latest one
                 prev_row["StopTime"] = max(prev_row["StopTime"], row["StopTime"])
                 continue  # Skip adding a new row, just update previous
