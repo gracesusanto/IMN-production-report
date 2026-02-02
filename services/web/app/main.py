@@ -54,7 +54,7 @@ def get_operator_status(operator_id: str, session=Sessioner):
     """
 
     # No need to show active activities that are not related to machine
-    activities = business_logic.get_operator_active_machines(operator_id, business_logic.NO_PLAN_CATEGORY, session)
+    activities = business_logic.get_operator_active_machines(operator_id, business_logic.NON_MACHINE_CATEGORY, session)
 
     # If the operator has no active activities, set isRunning to False
     # IN which case app will only display "Mulai Aktivitas Baru"
