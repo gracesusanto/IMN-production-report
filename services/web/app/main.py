@@ -175,8 +175,8 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
                 break
 
     # Get all operator's current active activities
-    # But no need to show NP category
-    active_operator_activities = business_logic.get_operator_active_machines(operator_id, business_logic.NO_PLAN_CATEGORY, session)
+    # But no need to show non-machine categories (NP, BT, BR) in "Anda sedang menjalankan mesin lain"
+    active_operator_activities = business_logic.get_operator_active_machines(operator_id, business_logic.NON_MACHINE_CATEGORY, session)
 
     # Get all operators currently using the requested machine
     # But no need to show Non-Machine related active activities

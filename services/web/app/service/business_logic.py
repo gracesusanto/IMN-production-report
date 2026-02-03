@@ -125,18 +125,31 @@ def process_activity(activity, session):
     # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
     # So for those, no need to filter by mesin
 
-    # Special handling for transitioning FROM Breaktime, Briefing, or No Plan
-    # When ending these non-machine activities, we need to stop ALL active activities for the operator
-    # This ensures that any machine activities that were paused during BT/BR get properly ended
-    if curr_category and curr_category in NON_MACHINE_CATEGORY:
-        activities_to_stop = (
-            session.query(models.ActivityMesin)
-            .filter(
-                models.ActivityMesin.operator_id == operator_id,
-                models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
+    # Special handling for transitions involving non-machine activities (BT, BR, NP)
+    # Case 1: Transitioning FROM non-machine activity - stop ALL active activities
+    # Case 2: Transitioning TO non-machine activity - stop ALL machine activities to prevent "still running" status
+    if (curr_category and curr_category in NON_MACHINE_CATEGORY) or (next_category and next_category in NON_MACHINE_CATEGORY):
+        if curr_category and curr_category in NON_MACHINE_CATEGORY:
+            # Ending BT/BR/NP - stop ALL activities to prevent persistence
+            activities_to_stop = (
+                session.query(models.ActivityMesin)
+                .filter(
+                    models.ActivityMesin.operator_id == operator_id,
+                    models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
+                )
+                .all()
             )
-            .all()
-        )
+        else:
+            # Starting BT/BR/NP - stop all machine-related activities but keep other non-machine activities
+            activities_to_stop = (
+                session.query(models.ActivityMesin)
+                .filter(
+                    models.ActivityMesin.operator_id == operator_id,
+                    models.ActivityMesin.stop_time_id.is_(None),  # Only active activities
+                    ~models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY)  # Only stop machine activities
+                )
+                .all()
+            )
     else:
         # For machine-related activities, use the original logic
         activities_to_stop_query = (
