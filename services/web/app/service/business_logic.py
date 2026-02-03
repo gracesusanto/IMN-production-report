@@ -124,23 +124,38 @@ def process_activity(activity, session):
     # Step 3: Find the previous ongoing ActivityMesin entry
     # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
     # So for those, no need to filter by mesin
-    activities_to_stop_query = (
-        session.query(models.ActivityMesin)
-        .filter(
-            models.ActivityMesin.operator_id == operator_id,
-            models.ActivityMesin.category == curr_category,
-            models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
+
+    # Special handling for transitioning FROM Breaktime, Briefing, or No Plan
+    # When ending these non-machine activities, we need to stop ALL active activities for the operator
+    # This ensures that any machine activities that were paused during BT/BR get properly ended
+    if curr_category and curr_category in NON_MACHINE_CATEGORY:
+        activities_to_stop = (
+            session.query(models.ActivityMesin)
+            .filter(
+                models.ActivityMesin.operator_id == operator_id,
+                models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
+            )
+            .all()
         )
-    )
+    else:
+        # For machine-related activities, use the original logic
+        activities_to_stop_query = (
+            session.query(models.ActivityMesin)
+            .filter(
+                models.ActivityMesin.operator_id == operator_id,
+                models.ActivityMesin.category == curr_category,
+                models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
+            )
+        )
 
-    # If it's NOT a non-machine category, further filter by mesin_id
-    if curr_category and curr_category not in NON_MACHINE_CATEGORY:
-        activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.mesin_id == mesin_id)
+        # If it's NOT a non-machine category, further filter by mesin_id
+        if curr_category and curr_category not in NON_MACHINE_CATEGORY:
+            activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.mesin_id == mesin_id)
 
-        if tooling_id:
-            activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.tooling_id == tooling_id)
+            if tooling_id:
+                activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.tooling_id == tooling_id)
 
-    activities_to_stop = activities_to_stop_query.all()
+        activities_to_stop = activities_to_stop_query.all()
 
     # Stop all selected activities
     if activities_to_stop:
