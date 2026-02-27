@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
-from sqlalchemy import not_, or_
+from sqlalchemy import not_, or_, and_
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
@@ -124,56 +124,47 @@ def process_activity(activity, session):
     # Step 3: Find the previous ongoing ActivityMesin entry
     # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
     # So for those, no need to filter by mesin
+    base_active = and_(
+        models.ActivityMesin.operator_id == operator_id,
+        models.ActivityMesin.stop_time_id.is_(None),
+    )
 
-    # Special handling for transitions involving non-machine activities (BT, BR, NP)
-    # Case 1: Transitioning FROM non-machine activity - stop ALL active activities
-    # Case 2: Transitioning TO non-machine activity - stop ALL machine activities to prevent "still running" status
-    if (curr_category and curr_category in NON_MACHINE_CATEGORY) or (next_category and next_category in NON_MACHINE_CATEGORY):
-        if curr_category and curr_category in NON_MACHINE_CATEGORY:
-            # Ending BT/BR/NP - stop ALL activities to prevent persistence
-            activities_to_stop = (
-                session.query(models.ActivityMesin)
-                .filter(
-                    models.ActivityMesin.operator_id == operator_id,
-                    models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
-                )
-                .all()
-            )
-        else:
-            # Starting BT/BR/NP - stop all machine-related activities but keep other non-machine activities
-            activities_to_stop = (
-                session.query(models.ActivityMesin)
-                .filter(
-                    models.ActivityMesin.operator_id == operator_id,
-                    models.ActivityMesin.stop_time_id.is_(None),  # Only active activities
-                    ~models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY)  # Only stop machine activities
-                )
-                .all()
-            )
-    else:
-        # For machine-related activities, use the original logic
-        activities_to_stop_query = (
-            session.query(models.ActivityMesin)
-            .filter(
-                models.ActivityMesin.operator_id == operator_id,
-                models.ActivityMesin.category == curr_category,
-                models.ActivityMesin.stop_time_id.is_(None)  # Only active activities
-            )
-        )
+    # Branch 1: any active NON_MACHINE_CATEGORY (no mesin/tooling restriction)
+    non_machine_branch = and_(
+        base_active,
+        models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY),
+    )
 
-        # If it's NOT a non-machine category, further filter by mesin_id
-        if curr_category and curr_category not in NON_MACHINE_CATEGORY:
-            activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.mesin_id == mesin_id)
+    # Branch 2: the chosen category (optionally restricted by mesin/tooling)
+    chosen_branch_filters = [
+        base_active,
+        models.ActivityMesin.category == curr_category,
+    ]
 
-            if tooling_id:
-                activities_to_stop_query = activities_to_stop_query.filter(models.ActivityMesin.tooling_id == tooling_id)
+    # Only restrict mesin/tooling when the chosen category is a machine category
+    if curr_category and curr_category not in NON_MACHINE_CATEGORY:
+        chosen_branch_filters.append(models.ActivityMesin.mesin_id == mesin_id)
+        if tooling_id:
+            chosen_branch_filters.append(models.ActivityMesin.tooling_id == tooling_id)
 
-        activities_to_stop = activities_to_stop_query.all()
+    chosen_branch = and_(*chosen_branch_filters)
+
+    activities_to_stop_query = session.query(models.ActivityMesin).filter(
+        or_(chosen_branch, non_machine_branch)
+    )
+
+    activities_to_stop = activities_to_stop_query.all()
 
     # Stop all selected activities
     if activities_to_stop:
         for activity in activities_to_stop:
             activity.stop_time_id = new_log.id
+
+            # For non-machine activities, only stop them (don't overwrite details)
+            if activity.category in NON_MACHINE_CATEGORY:
+                continue
+
+            # For machine / chosen-category activities, set the rest
             activity.output = output
             activity.reject = reject
             activity.rework = rework
