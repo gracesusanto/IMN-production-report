@@ -527,12 +527,12 @@ def get_report(
 
     df_imn = df_imn[imn_header]
 
-    df_imn.to_csv(
-        _get_csv_folder(
-            format="imn", type=report_category.value, date_from=date_from,
-            shift_from=shift_from, date_to=date_to, shift_to=shift_to,
-        ), sep=";",
-    )
+    # df_imn.to_csv(
+    #     _get_csv_folder(
+    #         format="imn", type=report_category.value, date_from=date_from,
+    #         shift_from=shift_from, date_to=date_to, shift_to=shift_to,
+    #     ), sep=";",
+    # )
 
     # limax report
     df_limax = df.copy(deep=True)
@@ -573,12 +573,12 @@ def get_report(
 
     df_limax = df_limax[limax_col].astype(str)
 
-    df_limax.to_csv(
-        _get_csv_folder(
-            format="limax", type=report_category.value, date_from=date_from,
-            shift_from=shift_from, date_to=date_to, shift_to=shift_to,
-        ), sep=";", index=False,
-    )
+    # df_limax.to_csv(
+    #     _get_csv_folder(
+    #         format="limax", type=report_category.value, date_from=date_from,
+    #         shift_from=shift_from, date_to=date_to, shift_to=shift_to,
+    #     ), sep=";", index=False,
+    # )
 
     if is_backup == True:
         filename = backup_filename(
