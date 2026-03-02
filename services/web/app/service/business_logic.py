@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
-from sqlalchemy import not_, or_, and_
+from sqlalchemy import not_, or_, and_, String, Text
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
@@ -603,7 +603,7 @@ def export_model_csv(model, model_name, session):
 
     # Create CSV content
     stream = io.StringIO()
-    writer = csv.writer(stream, delimiter=";")
+    writer = csv.writer(stream, delimiter=",")
 
     if records:
         # Write column headers (excluding time_created and time_updated)
@@ -622,9 +622,16 @@ def export_model_csv(model, model_name, session):
                     continue
 
                 value = getattr(record, column.name)
-                # Add Excel-compatible formatting for strings (same as backup.py)
-                if isinstance(value, str) and value:
-                    value = f'="{value}"'
+                # Handle None values
+                if value is None:
+                    value = ""
+                else:
+                    # For string columns, prepend with apostrophe to force text formatting in Excel
+                    if isinstance(column.type, (String, Text)):
+                        value = f"'{str(value)}"
+                    else:
+                        # For non-string columns (integers, etc.), keep as is
+                        value = str(value)
                 row.append(value)
             writer.writerow(row)
     else:
