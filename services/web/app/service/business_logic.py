@@ -603,7 +603,7 @@ def export_model_csv(model, model_name, session):
 
     # Create CSV content
     stream = io.StringIO()
-    writer = csv.writer(stream, delimiter=";")
+    writer = csv.writer(stream, delimiter=",")
 
     if records:
         # Write column headers (excluding time_created and time_updated)
