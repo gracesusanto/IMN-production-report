@@ -603,7 +603,7 @@ def export_model_csv(model, model_name, session):
 
     # Create CSV content
     stream = io.StringIO()
-    writer = csv.writer(stream, delimiter=";")
+    writer = csv.writer(stream, delimiter=",")
 
     if records:
         # Write column headers (excluding time_created and time_updated)
@@ -622,9 +622,9 @@ def export_model_csv(model, model_name, session):
                     continue
 
                 value = getattr(record, column.name)
-                # Add Excel-compatible formatting for strings (same as backup.py)
-                if isinstance(value, str) and value:
-                    value = f'="{value}"'
+                # Use clean values without Excel formatting to ensure proper CSV display
+                if value is None:
+                    value = ""
                 row.append(value)
             writer.writerow(row)
     else:
