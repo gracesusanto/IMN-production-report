@@ -517,6 +517,14 @@ def get_report(
         "Kode Tooling", "Common Tooling Name", "Part No", "Part Name", "Qty", "Target",
         "Reject", "Rework", "Desc", "Duration", "Productivity", "Reject Ratio", "Rework Ratio", "Keterangan",
     ]
+
+    # Ensure all required columns exist (add missing columns with default values)
+    for col in imn_header:
+        if col not in df_imn.columns:
+            df_imn[col] = "" if col in ["Desc", "Keterangan", "Duration", "Productivity", "Reject Ratio", "Rework Ratio",
+                                        "Tanggal", "StartTime", "StopTime", "Kode Tooling", "Common Tooling Name",
+                                        "Part No", "Part Name"] else 0
+
     df_imn = df_imn[imn_header]
 
     df_imn.to_csv(
@@ -541,12 +549,25 @@ def get_report(
         "Kode Keterangan": "DWN_CODE",
         "Keterangan Limax": "STR_DESC",
     }
+
+    # Ensure all required columns exist for LIMAX format
+    for original_col in limax_header.keys():
+        if original_col not in df_limax.columns:
+            df_limax[original_col] = "" if original_col in ["Tanggal", "Kode Tooling", "Keterangan Limax", "Kode Keterangan", "Awal", "Akhir"] else 0
+
     df_limax.rename(columns=limax_header, inplace=True)
     limax_col = [
         "STR_DATE", "STR_PLNT", "TLG_CODE", "STR_KUAN", "PEG_CODE",
         "SHF_CODE", "MSN_CODE", "STR_AWAL", "STR_AKHR", "DWN_CODE", "STR_DESC",
     ]
-    for col in df_limax.columns:
+
+    # Ensure all LIMAX columns exist after renaming
+    for col in limax_col:
+        if col not in df_limax.columns:
+            df_limax[col] = ""
+
+    # Remove columns that are not in limax_col
+    for col in list(df_limax.columns):
         if col not in limax_col:
             df_limax.drop(columns=col, inplace=True)
 
