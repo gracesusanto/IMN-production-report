@@ -357,6 +357,37 @@ def get_mesin_status(session=Sessioner):
     return {"details": mesin_status}
 
 # ----- READ APIs ----- #
+# ----- TIMESTAMP API for Cache Validation ----- #
+@app.get("/timestamps/{model}")
+def get_model_timestamps(model: str, session=Sessioner):
+    """
+    Get latest creation and update timestamps for any model records.
+    Used by frontend cache validation system.
+
+    Args:
+        model: One of 'tooling', 'mesin', 'operator'
+    """
+    # Map model names to their corresponding SQLAlchemy models
+    model_mapping = {
+        "tooling": models.Tooling,
+        "mesin": models.Mesin,
+        "operator": models.Operator,
+    }
+
+    model_class = model_mapping.get(model.lower())
+    if not model_class:
+        raise fastapi.HTTPException(404, f"Model '{model}' not found. Available models: {list(model_mapping.keys())}")
+
+    latest_created = session.query(func.max(model_class.time_created)).scalar()
+    latest_updated = session.query(func.max(model_class.time_updated)).scalar()
+
+    return {
+        "model": model,
+        "latest_created": latest_created.isoformat() if latest_created else None,
+        "latest_updated": latest_updated.isoformat() if latest_updated else None
+    }
+
+
 @app.get("/tooling/{tooling_id}", response_model=schema.Tooling)
 def get_tooling(tooling_id: str, session=Sessioner):
     tooling = (
