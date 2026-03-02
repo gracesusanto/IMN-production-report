@@ -253,6 +253,30 @@ def get_report(request: schema.ReportRequest):
     )
     return business_logic.generate_report_response(df, filename, request.format)
 
+# ----- MODEL DATA CSV EXPORT API ----- #
+@app.get("/export/csv")
+def export_model_csv(model: str, session=Sessioner):
+    """
+    Export model data as CSV file.
+    Query parameter 'model' should be one of: tooling, mesin, operator
+    """
+    # Map model names to model classes
+    model_mapping = {
+        "tooling": models.Tooling,
+        "mesin": models.Mesin,
+        "operator": models.Operator
+    }
+
+    # Validate model parameter
+    if model.lower() not in model_mapping:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model '{model}'. Must be one of: {', '.join(model_mapping.keys())}"
+        )
+
+    model_class = model_mapping[model.lower()]
+    return business_logic.export_model_csv(model_class, model.lower(), session)
+
 # ---- DB INGESTION APIs ---#
 @app.post("/db-ingestion")
 def import_to_db():
@@ -504,6 +528,21 @@ async def download_barcode(model: str, session=Sessioner):
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+@app.get("/barcode")
+async def get_single_barcode(model: str, id: str, session=Sessioner):
+    """
+    Generate and return a single barcode image for a specific record.
+    Query parameters:
+    - model: one of 'tooling', 'mesin', 'operator'
+    - id: the record ID to generate barcode for
+    """
+    barcode_image = business_logic.generate_single_barcode(model, id, session)
+
+    return StreamingResponse(
+        barcode_image,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="{model}_{id}_barcode.png"'},
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

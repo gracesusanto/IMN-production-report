@@ -510,6 +510,55 @@ def generate_barcode(model, session):
     return excel_file, filename
 
 
+def generate_single_barcode(model_type, record_id, session):
+    """
+    Generate a single QR code barcode for a specific record ID.
+    Returns a PNG image of the QR code.
+    """
+    # Validate model and check if record exists
+    model_mapping = {
+        "tooling": models.Tooling,
+        "mesin": models.Mesin,
+        "operator": models.Operator
+    }
+
+    if model_type.lower() not in model_mapping:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model '{model_type}'. Must be one of: {', '.join(model_mapping.keys())}"
+        )
+
+    model_class = model_mapping[model_type.lower()]
+
+    # Check if record exists
+    record = session.query(model_class).filter(model_class.id == record_id).first()
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Record with ID '{record_id}' not found in {model_type} table"
+        )
+
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,  # Larger box size for better visibility
+        border=4,
+    )
+    qr.add_data(record_id)
+    qr.make(fit=True)
+
+    # Create QR code image
+    img_pil = qr.make_image(fill_color="black", back_color="white")
+
+    # Convert to bytes
+    img_byte_arr = BytesIO()
+    img_pil.save(img_byte_arr, format="PNG")
+    img_byte_arr.seek(0)
+
+    return img_byte_arr
+
+
 def generate_report_response(df, filename, report_format):
     if "dashboard" in report_format.value:
         return JSONResponse(content=df.to_dict(orient="records"))
@@ -538,6 +587,63 @@ def generate_report_response(df, filename, report_format):
             media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
+
+
+def export_model_csv(model, model_name, session):
+    """
+    Export all records from a model table as CSV file.
+    Similar to backup functionality but returns a streaming response.
+    Excludes time_created and time_updated columns.
+    """
+    # Query all records from the model
+    records = session.query(model).all()
+
+    # Define columns to exclude from export
+    excluded_columns = ["time_created", "time_updated"]
+
+    # Create CSV content
+    stream = io.StringIO()
+    writer = csv.writer(stream, delimiter=";")
+
+    if records:
+        # Write column headers (excluding time_created and time_updated)
+        column_names = [
+            column.name for column in records[0].__table__.columns
+            if column.name not in excluded_columns
+        ]
+        writer.writerow(column_names)
+
+        # Write data rows
+        for record in records:
+            row = []
+            for column in record.__table__.columns:
+                # Skip excluded columns
+                if column.name in excluded_columns:
+                    continue
+
+                value = getattr(record, column.name)
+                # Add Excel-compatible formatting for strings (same as backup.py)
+                if isinstance(value, str) and value:
+                    value = f'="{value}"'
+                row.append(value)
+            writer.writerow(row)
+    else:
+        # If no records, just write headers from the model (excluding time columns)
+        column_names = [
+            column.name for column in model.__table__.columns
+            if column.name not in excluded_columns
+        ]
+        writer.writerow(column_names)
+
+    stream.seek(0)
+    response_content = stream.getvalue()
+    filename = f"{model_name}_export.csv"
+
+    return StreamingResponse(
+        iter([response_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 def _get_downtime_category(downtime_category):
