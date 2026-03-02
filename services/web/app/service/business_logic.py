@@ -601,9 +601,9 @@ def export_model_csv(model, model_name, session):
     # Define columns to exclude from export
     excluded_columns = ["time_created", "time_updated"]
 
-    # Create CSV content
+    # Create CSV content with proper quoting for text fields
     stream = io.StringIO()
-    writer = csv.writer(stream, delimiter=",")
+    writer = csv.writer(stream, delimiter=",", quoting=csv.QUOTE_NONNUMERIC)
 
     if records:
         # Write column headers (excluding time_created and time_updated)
@@ -622,16 +622,15 @@ def export_model_csv(model, model_name, session):
                     continue
 
                 value = getattr(record, column.name)
-                # Handle None values
+                # Handle None values and convert to proper types for CSV quoting
                 if value is None:
                     value = ""
+                elif isinstance(column.type, (String, Text)):
+                    # Keep strings as strings so they get quoted by QUOTE_NONNUMERIC
+                    value = str(value)
                 else:
-                    # For string columns, prepend with apostrophe to force text formatting in Excel
-                    if isinstance(column.type, (String, Text)):
-                        value = f"'{str(value)}"
-                    else:
-                        # For non-string columns (integers, etc.), keep as is
-                        value = str(value)
+                    # Keep numeric values as numbers so they don't get quoted
+                    value = value
                 row.append(value)
             writer.writerow(row)
     else:
