@@ -103,8 +103,8 @@ class FormatType(str, Enum):
 
 
 class Activity(BaseModel):
-    tooling_id: str
-    mesin_id: str
+    tooling_id: Optional[str]
+    mesin_id: Optional[str]
     operator_id: str
     curr_category: Union[str, None]
     next_category: str

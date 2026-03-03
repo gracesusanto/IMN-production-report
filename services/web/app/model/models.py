@@ -141,3 +141,86 @@ class ActivityMesin(Base):
     time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
+
+class ActivityReport(Base):
+    """
+    Denormalized table storing completed activities with all join data pre-computed.
+
+    This table improves report generation performance by avoiding expensive joins
+    between ActivityMesin, MesinLog, Operator, Mesin, and Tooling tables.
+
+    Each row represents a completed activity (stop_time_id is NOT NULL).
+
+    Decision on NON_MACHINE_CATEGORY: We INCLUDE them in this table for consistency
+    and complete audit trail. Mesin_id/tooling_id will be NULL for these categories.
+    """
+    __tablename__ = "activity_report"
+
+    # Primary key and unique constraint
+    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True, index=True)
+    activity_id = sa.Column(sa.Integer, sa.ForeignKey('activity_mesin.id', ondelete='CASCADE'),
+                           nullable=False, unique=True, index=True)
+    start_time_id = sa.Column(sa.Integer, sa.ForeignKey('mesin_log.id', ondelete='CASCADE'),
+                             nullable=False)
+    stop_time_id = sa.Column(sa.Integer, sa.ForeignKey('mesin_log.id', ondelete='CASCADE'),
+                            nullable=False)
+
+    # Activity info
+    category = sa.Column(sa.String, nullable=False, index=True)
+
+    # Operator info (denormalized) - always present
+    operator_id = sa.Column(sa.String, sa.ForeignKey('operator.id', ondelete='CASCADE'),
+                           nullable=False, index=True)
+    operator_name = sa.Column(sa.String, nullable=False)
+    operator_nik = sa.Column(sa.String, nullable=False)
+
+    # Machine info (nullable for NON_MACHINE_CATEGORY)
+    mesin_id = sa.Column(sa.String, sa.ForeignKey('mesin.id', ondelete='CASCADE'),
+                        nullable=True)
+    mesin_name = sa.Column(sa.String, nullable=True)
+
+    # Tooling info (nullable)
+    tooling_id = sa.Column(sa.String, sa.ForeignKey('tooling.id', ondelete='CASCADE'),
+                          nullable=True)
+    kode_tooling = sa.Column(sa.String, nullable=True)
+    common_tooling_name = sa.Column(sa.String, nullable=True)
+    part_no = sa.Column(sa.String, nullable=True)
+    part_name = sa.Column(sa.String, nullable=True)
+    std_jam = sa.Column(sa.Integer, nullable=True)
+
+    # Production data - consistent with ActivityMesin defaults
+    output = sa.Column(sa.Integer, nullable=False, default=0, server_default=sa.text('0'))
+    reject = sa.Column(sa.Integer, nullable=False, default=0, server_default=sa.text('0'))
+    rework = sa.Column(sa.Integer, nullable=False, default=0, server_default=sa.text('0'))
+    coil_no = sa.Column(sa.String, nullable=True)
+    lot_no = sa.Column(sa.String, nullable=True)
+    pack_no = sa.Column(sa.String, nullable=True)
+    keterangan = sa.Column(sa.Text, nullable=True)
+
+    # Timestamps (indexed for fast range queries) - NOT NULL for completed activities
+    start_ts_utc = sa.Column(sa.DateTime(timezone=True), nullable=False, index=True)
+    stop_ts_utc = sa.Column(sa.DateTime(timezone=True), nullable=False, index=True)
+
+    # Pre-computed Jakarta timezone columns for optimized report generation
+    start_date_jakarta = sa.Column(sa.String(10), nullable=True, index=True, comment='dd/mm/yyyy')
+    stop_date_jakarta = sa.Column(sa.String(10), nullable=True, comment='dd/mm/yyyy')
+    start_time_jakarta = sa.Column(sa.String(8), nullable=True, comment='HH:MM:SS')
+    stop_time_jakarta = sa.Column(sa.String(8), nullable=True, comment='HH:MM:SS')
+    start_datetime_jakarta = sa.Column(sa.String(19), nullable=True, comment='mm/dd/yyyy HH:MM:SS')
+    stop_datetime_jakarta = sa.Column(sa.String(19), nullable=True, comment='mm/dd/yyyy HH:MM:SS')
+    shift = sa.Column(sa.Integer, nullable=True, comment='Pre-computed shift number (1, 2, or 3)')
+
+    # Pre-computed derived metrics for optimized report generation
+    duration_seconds = sa.Column(sa.Integer, nullable=True, comment='Duration in seconds')
+    productivity_percent = sa.Column(sa.Numeric(5,2), nullable=True, index=True, comment='Productivity percentage')
+    reject_ratio_percent = sa.Column(sa.Numeric(5,2), nullable=True, comment='Reject ratio percentage')
+    rework_ratio_percent = sa.Column(sa.Numeric(5,2), nullable=True, comment='Rework ratio percentage')
+    # NOTE: Formatting is now done at presentation time for better performance and flexibility
+    plant = sa.Column(sa.String(1), nullable=True, index=True, comment='Plant identifier from machine name')
+    awal_limax = sa.Column(sa.String(4), nullable=True, comment='Start time for LIMAX format (HHMM)')
+    akhir_limax = sa.Column(sa.String(4), nullable=True, comment='Stop time for LIMAX format (HHMM)')
+    kode_keterangan = sa.Column(sa.String(2), nullable=True, comment='Category code (first 2 chars of description)')
+
+    # NOTE: Removed time_updated as it's not needed for denormalized report table
+    time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
+

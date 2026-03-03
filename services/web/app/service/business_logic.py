@@ -16,6 +16,9 @@ from pydantic import ValidationError
 
 import app.model.models as models
 import app.schema as schema
+from app.service.report_calculations import compute_all_derived_fields
+from sqlalchemy.orm import aliased
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 # Kategori yang tidak melibatkan mesin
 # Dipakai di /operator/status supaya tidak usah menampilkan pilihan STOP untuk kategori ini
@@ -75,13 +78,16 @@ def process_activity(activity, session):
     Ensures strict chronological tracking of machine operations and avoids overlapping activities.
     """
 
+    def normalize_null_to_zero(value):
+        return 0 if value is None else value
+
     # Empty tooling and mesin means user choose: Mulai Aktivitas Baru and then pick NP / BR / BT (non machine activity)
     tooling_id = activity.tooling_id
     mesin_id = activity.mesin_id
     operator_id = activity.operator_id
-    output = activity.output
-    reject = activity.reject
-    rework = activity.rework
+    output = normalize_null_to_zero(activity.output)
+    reject = normalize_null_to_zero(activity.reject)
+    rework = normalize_null_to_zero(activity.rework)
     coil_no = activity.coil_no
     lot_no = activity.lot_no
     pack_no = activity.pack_no
@@ -89,103 +95,133 @@ def process_activity(activity, session):
     curr_category = activity.curr_category
     next_category = activity.next_category
 
-    print(mesin_id)
-    print(tooling_id)
-    print(curr_category)
-
-    # Step 1: Insert new MesinLog entry
-    new_log = models.MesinLog(
-        mesin_id=mesin_id,
-        operator_id=operator_id,
-        tooling_id=tooling_id,
-        curr_category=curr_category,
-        next_category=next_category,
-    )
-    session.add(new_log)
-    session.commit()
-
-    # Step 2: Stop any NP activity
-    np_activities = (
-    session.query(models.ActivityMesin)
-        .filter(
-            models.ActivityMesin.operator_id == operator_id,
-            models.ActivityMesin.stop_time_id.is_(None),  # Only active activities
-            models.ActivityMesin.category.startswith("NP")  # Only NP activities
+    try:
+        # Step 1: Insert new MesinLog entry (use flush to get ID without committing)
+        new_log = models.MesinLog(
+            mesin_id=mesin_id,
+            operator_id=operator_id,
+            tooling_id=tooling_id,
+            curr_category=curr_category,
+            next_category=next_category,
         )
-        .all()
-    )
+        session.add(new_log)
+        session.flush()  # Get new_log.id without committing
 
-    # Stop NP activities by setting their stop_time_id
-    if np_activities:
-        for np_activity in np_activities:
-            np_activity.stop_time_id = new_log.id  # Use new log entry to mark the stop
+        # Step 2: Stop any NP activity
+        np_activities = (
+        session.query(models.ActivityMesin)
+            .filter(
+                models.ActivityMesin.operator_id == operator_id,
+                models.ActivityMesin.stop_time_id.is_(None),  # Only active activities
+                models.ActivityMesin.category.startswith("NP")  # Only NP activities
+            )
+            .all()
+        )
+
+        # Stop NP activities by setting their stop_time_id
+        stopped_activity_ids = set()  # Use set to avoid duplicates
+        if np_activities:
+            for np_activity in np_activities:
+                np_activity.stop_time_id = new_log.id  # Use new log entry to mark the stop
+                stopped_activity_ids.add(np_activity.id)
+
+        # Step 3: Find the previous ongoing ActivityMesin entry
+        # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
+        # So for those, no need to filter by mesin
+        base_active = and_(
+            models.ActivityMesin.operator_id == operator_id,
+            models.ActivityMesin.stop_time_id.is_(None),
+        )
+
+        # Branch 1: any active NON_MACHINE_CATEGORY (no mesin/tooling restriction)
+        non_machine_branch = and_(
+            base_active,
+            models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY),
+        )
+
+        # Branch 2: any active activity with NO MC and NO TL (covers blank rows)
+        no_mc_tl_branch = and_(
+            base_active,
+            models.ActivityMesin.mesin_id.is_(None),
+            models.ActivityMesin.tooling_id.is_(None),
+        )
+
+        # Branch 3: the chosen category (optionally restricted by mesin/tooling)
+        chosen_branch_filters = [
+            base_active,
+            models.ActivityMesin.category == curr_category,
+        ]
+
+        # Only restrict mesin/tooling when the chosen category is a machine category
+        if curr_category and curr_category not in NON_MACHINE_CATEGORY:
+            chosen_branch_filters.append(models.ActivityMesin.mesin_id == mesin_id)
+            if tooling_id:
+                chosen_branch_filters.append(models.ActivityMesin.tooling_id == tooling_id)
+
+        chosen_branch = and_(*chosen_branch_filters)
+
+        activities_to_stop_query = session.query(models.ActivityMesin).filter(
+            or_(chosen_branch, non_machine_branch, no_mc_tl_branch)
+        )
+
+        activities_to_stop = activities_to_stop_query.all()
+
+        # Stop all selected activities and update production data
+        if activities_to_stop:
+            for activity in activities_to_stop:
+                activity.stop_time_id = new_log.id
+                stopped_activity_ids.add(activity.id)  # Use set.add() to avoid duplicates
+
+                # For non-machine activities, only stop them (don't overwrite details)
+                if activity.category in NON_MACHINE_CATEGORY:
+                    continue
+
+                # For machine / chosen-category activities, set the rest
+                activity.output = output
+                activity.reject = reject
+                activity.rework = rework
+                activity.coil_no = coil_no
+                activity.lot_no = lot_no
+                activity.pack_no = pack_no
+                activity.keterangan = keterangan
+
+        # Flush to make stop_time_id updates visible
+        session.flush()
+
+        # Step 4: Create a new ActivityMesin entry for the next activity
+        new_activity = models.ActivityMesin(
+            mesin_id=mesin_id,
+            operator_id=operator_id,
+            tooling_id=tooling_id,
+            category=next_category,
+            start_time_id=new_log.id,  # Set this new log as the start time
+            stop_time_id=None,  # It has just started, so stop time remains NULL
+        )
+        session.add(new_activity)
+
+        # Commit everything atomically
         session.commit()
 
-    # Step 3: Find the previous ongoing ActivityMesin entry
-    # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
-    # So for those, no need to filter by mesin
-    base_active = and_(
-        models.ActivityMesin.operator_id == operator_id,
-        models.ActivityMesin.stop_time_id.is_(None),
-    )
+        # Create ActivityReport entries for each stopped activity AFTER commit
+        # DECISION: Include ALL categories (including NON_MACHINE_CATEGORY) for complete audit trail
+        # The report query will filter them out as needed for backward compatibility
+        # IMPORTANT: This must happen AFTER commit so the activities are actually completed
 
-    # Branch 1: any active NON_MACHINE_CATEGORY (no mesin/tooling restriction)
-    non_machine_branch = and_(
-        base_active,
-        models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY),
-    )
+        if stopped_activity_ids:
+            # Synchronous mode - create reports immediately for reliability
+            for activity_id in stopped_activity_ids:
+                try:
+                    upsert_activity_report(activity_id, session)
+                except Exception as e:
+                    # Log error but continue with other activities
+                    print(f"Error creating ActivityReport for activity {activity_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-    # Branch 2: the chosen category (optionally restricted by mesin/tooling)
-    chosen_branch_filters = [
-        base_active,
-        models.ActivityMesin.category == curr_category,
-    ]
-
-    # Only restrict mesin/tooling when the chosen category is a machine category
-    if curr_category and curr_category not in NON_MACHINE_CATEGORY:
-        chosen_branch_filters.append(models.ActivityMesin.mesin_id == mesin_id)
-        if tooling_id:
-            chosen_branch_filters.append(models.ActivityMesin.tooling_id == tooling_id)
-
-    chosen_branch = and_(*chosen_branch_filters)
-
-    activities_to_stop_query = session.query(models.ActivityMesin).filter(
-        or_(chosen_branch, non_machine_branch)
-    )
-
-    activities_to_stop = activities_to_stop_query.all()
-
-    # Stop all selected activities
-    if activities_to_stop:
-        for activity in activities_to_stop:
-            activity.stop_time_id = new_log.id
-
-            # For non-machine activities, only stop them (don't overwrite details)
-            if activity.category in NON_MACHINE_CATEGORY:
-                continue
-
-            # For machine / chosen-category activities, set the rest
-            activity.output = output
-            activity.reject = reject
-            activity.rework = rework
-            activity.coil_no = coil_no
-            activity.lot_no = lot_no
-            activity.pack_no = pack_no
-            activity.keterangan = keterangan
-
-        session.commit()
-
-    # Step 4: Create a new ActivityMesin entry for the next activity
-    new_activity = models.ActivityMesin(
-        mesin_id=mesin_id,
-        operator_id=operator_id,
-        tooling_id=tooling_id,
-        category=next_category,
-        start_time_id=new_log.id,  # Set this new log as the start time
-        stop_time_id=None,  # It has just started, so stop time remains NULL
-    )
-    session.add(new_activity)
-    session.commit()
+    except Exception as e:
+        # Rollback on any failure and re-raise
+        session.rollback()
+        raise
 
 
 def _determine_new_mesin_status(downtime_category):
@@ -656,3 +692,227 @@ def _update_downtime_mesin_status(downtime_category):
         if _get_downtime_category(downtime_category) in ["TP", "TS", "TL"]
         else models.Status.IDLE
     )
+
+
+def build_activity_report_row(activity_id, session):
+    """
+    Builds a dictionary with all denormalized data for ActivityReport table.
+
+    OPTIMIZED: Single query with all joins, requires stop_time_id IS NOT NULL.
+    Only completed activities should have ActivityReport entries.
+
+    Args:
+        activity_id (int): The ActivityMesin.id
+        session: SQLAlchemy session
+
+    Returns:
+        dict: Mapping of ActivityReport column names to values
+
+    Raises:
+        ValueError: If activity not found or not completed (stop_time_id is NULL)
+    """
+    # Aliases for start and stop MesinLog records
+    activity_start = aliased(models.MesinLog)
+    activity_stop = aliased(models.MesinLog)
+
+    # Single query with all joins - requires stop_time_id IS NOT NULL
+    query = (
+        session.query(
+            models.ActivityMesin.id,
+            models.ActivityMesin.start_time_id,
+            models.ActivityMesin.stop_time_id,
+            models.ActivityMesin.category,
+            models.ActivityMesin.output,
+            models.ActivityMesin.reject,
+            models.ActivityMesin.rework,
+            models.ActivityMesin.coil_no,
+            models.ActivityMesin.lot_no,
+            models.ActivityMesin.pack_no,
+            models.ActivityMesin.keterangan,
+
+            # Start and stop timestamps
+            activity_start.timestamp.label("start_ts"),
+            activity_stop.timestamp.label("stop_ts"),
+
+            # Operator info (required - must exist)
+            models.Operator.id.label("operator_id"),
+            models.Operator.name.label("operator_name"),
+            models.Operator.nik.label("operator_nik"),
+
+            # Machine info (nullable for NON_MACHINE_CATEGORY)
+            models.Mesin.id.label("mesin_id"),
+            models.Mesin.name.label("mesin_name"),
+
+            # Tooling info (nullable)
+            models.Tooling.id.label("tooling_id"),
+            models.Tooling.kode_tooling,
+            models.Tooling.common_tooling_name,
+            models.Tooling.part_no,
+            models.Tooling.part_name,
+            models.Tooling.std_jam,
+        )
+        .join(activity_start, models.ActivityMesin.start_time_id == activity_start.id)
+        .join(activity_stop, models.ActivityMesin.stop_time_id == activity_stop.id)  # This join enforces stop_time_id NOT NULL
+        .join(models.Operator, models.Operator.id == activity_start.operator_id)
+        .outerjoin(models.Mesin, models.ActivityMesin.mesin_id == models.Mesin.id)
+        .outerjoin(models.Tooling, models.ActivityMesin.tooling_id == models.Tooling.id)
+        .filter(models.ActivityMesin.id == activity_id)
+        .filter(models.ActivityMesin.stop_time_id.isnot(None))  # Explicit safety check
+    )
+
+    result = query.first()
+    if not result:
+        raise ValueError(f"Activity {activity_id} is not completed (stop_time_id is NULL) or not found")
+
+    # Extract production values with defaults
+    output = result.output if result.output is not None else 0
+    reject = result.reject if result.reject is not None else 0
+    rework = result.rework if result.rework is not None else 0
+    target_per_hour = result.std_jam if result.std_jam is not None else 0
+
+    # Pre-compute all derived fields using the calculation functions
+    computed_fields = compute_all_derived_fields(
+        start_ts_utc=result.start_ts,
+        stop_ts_utc=result.stop_ts,
+        category=result.category,
+        output=output,
+        reject=reject,
+        rework=rework,
+        target_per_hour=target_per_hour,
+        machine_name=result.mesin_name
+    )
+
+    # Build the dictionary for ActivityReport, including pre-computed fields
+    base_data = {
+        'activity_id': result.id,
+        'start_time_id': result.start_time_id,
+        'stop_time_id': result.stop_time_id,
+        'category': result.category,
+
+        # Operator info (always present)
+        'operator_id': result.operator_id,
+        'operator_name': result.operator_name,
+        'operator_nik': result.operator_nik,
+
+        # Machine info (nullable for NON_MACHINE_CATEGORY)
+        'mesin_id': result.mesin_id,
+        'mesin_name': result.mesin_name,
+
+        # Tooling info (nullable)
+        'tooling_id': result.tooling_id,
+        'kode_tooling': result.kode_tooling,
+        'common_tooling_name': result.common_tooling_name,
+        'part_no': result.part_no,
+        'part_name': result.part_name,
+        'std_jam': result.std_jam,
+
+        # Production data (ensure integers, default 0)
+        'output': output,
+        'reject': reject,
+        'rework': rework,
+        'coil_no': result.coil_no,
+        'lot_no': result.lot_no,
+        'pack_no': result.pack_no,
+        'keterangan': result.keterangan,
+
+        # Timestamps in UTC
+        'start_ts_utc': result.start_ts,
+        'stop_ts_utc': result.stop_ts,
+    }
+
+    # Merge pre-computed fields
+    base_data.update(computed_fields)
+    return base_data
+
+
+def upsert_activity_report(activity_id, session):
+    """
+    Idempotent upsert of ActivityReport record based on activity_id.
+
+    Uses database-specific INSERT ... ON CONFLICT/REPLACE for atomic upsert.
+    If record exists, all fields are updated. If not, new record is inserted.
+
+    Args:
+        activity_id (int): The ActivityMesin.id to upsert
+        session: SQLAlchemy session
+
+    Raises:
+        Any exception from build_activity_report_row or database operations
+    """
+    # Get the denormalized data (will raise if activity is incomplete)
+    row_data = build_activity_report_row(activity_id, session)
+
+    # Detect database dialect and use appropriate upsert syntax
+    dialect_name = session.bind.dialect.name
+
+    if dialect_name == 'postgresql':
+        # PostgreSQL: Use INSERT ... ON CONFLICT
+        stmt = pg_insert(models.ActivityReport).values(row_data)
+        upsert_stmt = stmt.on_conflict_do_update(
+            constraint='uq_activity_report_activity_id',
+            set_={
+                'start_time_id': stmt.excluded.start_time_id,
+                'stop_time_id': stmt.excluded.stop_time_id,
+                'category': stmt.excluded.category,
+                'operator_id': stmt.excluded.operator_id,
+                'operator_name': stmt.excluded.operator_name,
+                'operator_nik': stmt.excluded.operator_nik,
+                'mesin_id': stmt.excluded.mesin_id,
+                'mesin_name': stmt.excluded.mesin_name,
+                'tooling_id': stmt.excluded.tooling_id,
+                'kode_tooling': stmt.excluded.kode_tooling,
+                'common_tooling_name': stmt.excluded.common_tooling_name,
+                'part_no': stmt.excluded.part_no,
+                'part_name': stmt.excluded.part_name,
+                'std_jam': stmt.excluded.std_jam,
+                'output': stmt.excluded.output,
+                'reject': stmt.excluded.reject,
+                'rework': stmt.excluded.rework,
+                'coil_no': stmt.excluded.coil_no,
+                'lot_no': stmt.excluded.lot_no,
+                'pack_no': stmt.excluded.pack_no,
+                'keterangan': stmt.excluded.keterangan,
+                'start_ts_utc': stmt.excluded.start_ts_utc,
+                'stop_ts_utc': stmt.excluded.stop_ts_utc,
+
+                # Pre-computed Jakarta timezone fields
+                'start_date_jakarta': stmt.excluded.start_date_jakarta,
+                'stop_date_jakarta': stmt.excluded.stop_date_jakarta,
+                'start_time_jakarta': stmt.excluded.start_time_jakarta,
+                'stop_time_jakarta': stmt.excluded.stop_time_jakarta,
+                'start_datetime_jakarta': stmt.excluded.start_datetime_jakarta,
+                'stop_datetime_jakarta': stmt.excluded.stop_datetime_jakarta,
+                'shift': stmt.excluded.shift,
+
+                # Pre-computed derived metrics (decimals only)
+                'duration_seconds': stmt.excluded.duration_seconds,
+                'productivity_percent': stmt.excluded.productivity_percent,
+                'reject_ratio_percent': stmt.excluded.reject_ratio_percent,
+                'rework_ratio_percent': stmt.excluded.rework_ratio_percent,
+                'plant': stmt.excluded.plant,
+                'awal_limax': stmt.excluded.awal_limax,
+                'akhir_limax': stmt.excluded.akhir_limax,
+                'kode_keterangan': stmt.excluded.kode_keterangan,
+            }
+        )
+        session.execute(upsert_stmt)
+    else:
+        # SQLite and other databases: Use manual check-and-upsert
+        existing = session.query(models.ActivityReport).filter(
+            models.ActivityReport.activity_id == activity_id
+        ).first()
+
+        if existing:
+            # Update existing record
+            for key, value in row_data.items():
+                if key not in ['id', 'time_created']:  # Don't update these fields
+                    setattr(existing, key, value)
+        else:
+            # Insert new record
+            new_report = models.ActivityReport(**row_data)
+            session.add(new_report)
+
+
+# Backward compatibility aliases - now that functions are synchronous, these are just aliases
+upsert_activity_report_sync = upsert_activity_report
+build_activity_report_row_sync = build_activity_report_row

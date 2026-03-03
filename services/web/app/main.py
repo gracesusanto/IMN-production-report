@@ -288,6 +288,10 @@ async def mock_data_api():
     mock_data.run_activity()
     return
 
+@app.post("/mock/seed-activities")
+def seed_mock_activities(session=Sessioner):
+    return mock_data.mock_activity(session)
+
 # ----- BACKUP APIs ----- #
 @app.post("/db-backup")
 def backup_to_csv():

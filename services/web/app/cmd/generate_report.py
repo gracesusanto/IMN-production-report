@@ -12,6 +12,7 @@ import pytz
 import app.database as database
 import app.model.models as models
 import app.schema as schema
+from app.cmd.generate_report_optimized import query_activity_report_optimized, df_to_report_optimized
 
 """
 All timezone-aware dates and times are stored internally in UTC.
@@ -19,6 +20,11 @@ They are converted to local time in the zone specified by
 the timezone configuration parameter before being displayed to the client.
 """
 _JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
+
+# Feature flag to enable the new activity_report table for reporting
+# Set to True to use the new denormalized table for better performance
+# Set to False to use the original query with joins (legacy behavior)
+USE_ACTIVITY_REPORT_TABLE = True
 
 _WORKING_SHIFT_JSON = {
     "Saturday": {"start": {"1": 7, "2": 12, "3": 17}, "duration": 5},
@@ -230,7 +236,10 @@ def _format_time_for_limax(time):
 
 
 engine = database.get_engine()
-session = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+
+def session():
+    """Create a new database session."""
+    return sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
 
 
 def _calculate_productivity(row):
@@ -280,7 +289,7 @@ def query_activity_mesin(time_from, time_to):
     activity_stop = aliased(models.MesinLog)
 
     query = (
-        session.query(
+        session().query(
             models.ActivityMesin.id,
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
@@ -313,7 +322,7 @@ def query_activity_mesin(time_from, time_to):
         .order_by(models.Mesin.name.asc(), activity_start.timestamp.asc())
     )
 
-    result = session.execute(query)
+    result = session().execute(query)
     df = pd.DataFrame(result.fetchall(), columns=result.keys())
 
     if df.empty:
@@ -335,13 +344,115 @@ def query_activity_mesin(time_from, time_to):
 
     return df
 
+
+def query_activity_report(time_from, time_to):
+    """
+    Query activity records from the denormalized activity_report table.
+
+    This function replaces query_activity_mesin() and provides the same column structure
+    but with much better performance by avoiding expensive joins.
+
+    AUTOMATIC BACKFILL: If no data is found in ActivityReport table, this function
+    automatically backfills missing entries from ActivityMesin table before retrying.
+
+    Returns same columns as query_activity_mesin for backward compatibility:
+    MC, Operator, NIK, Tooling, Kode Tooling, Common Tooling Name,
+    Part No, Part Name, Target, Start, Stop, Desc, Qty, Reject, Rework,
+    Coil No, Lot No, Pack No, Keterangan
+    """
+    # First, ensure all ActivityReport entries exist for the requested time range
+    from app.service.report_backfill import ensure_activity_reports_exist
+    try:
+        total_missing, backfilled = ensure_activity_reports_exist(time_from, time_to)
+        if backfilled > 0:
+            print(f"Automatically backfilled {backfilled} missing ActivityReport entries")
+    except Exception as e:
+        print(f"Warning: Backfill failed, proceeding with available data: {e}")
+
+    query = (
+        session().query(
+            models.ActivityReport.mesin_name.label("MC"),
+            models.ActivityReport.operator_name.label("Operator"),
+            models.ActivityReport.operator_nik.label("NIK"),
+            models.ActivityReport.tooling_id.label("Tooling"),
+            models.ActivityReport.kode_tooling.label("Kode Tooling"),
+            models.ActivityReport.common_tooling_name.label("Common Tooling Name"),
+            models.ActivityReport.part_no.label("Part No"),
+            models.ActivityReport.part_name.label("Part Name"),
+            models.ActivityReport.std_jam.label("Target"),
+            models.ActivityReport.start_ts_utc.label("Start"),
+            models.ActivityReport.stop_ts_utc.label("Stop"),
+            models.ActivityReport.category.label("Desc"),
+            models.ActivityReport.output.label("Qty"),
+            models.ActivityReport.reject.label("Reject"),
+            models.ActivityReport.rework.label("Rework"),
+            models.ActivityReport.coil_no.label("Coil No"),
+            models.ActivityReport.lot_no.label("Lot No"),
+            models.ActivityReport.pack_no.label("Pack No"),
+            models.ActivityReport.keterangan.label("Keterangan"),
+        )
+        .filter(models.ActivityReport.start_ts_utc >= time_from)
+        .filter(models.ActivityReport.start_ts_utc < time_to)
+        .order_by(models.ActivityReport.mesin_name.asc().nulls_last(), models.ActivityReport.start_ts_utc.asc())
+    )
+
+    # Use query.all() for SQLAlchemy version safety
+    results = query.all()
+    if results:
+        # Extract columns and build DataFrame
+        columns = [
+            "MC", "Operator", "NIK", "Tooling", "Kode Tooling", "Common Tooling Name",
+            "Part No", "Part Name", "Target", "Start", "Stop", "Desc",
+            "Qty", "Reject", "Rework", "Coil No", "Lot No", "Pack No", "Keterangan"
+        ]
+        data = [list(row) for row in results]
+        df = pd.DataFrame(data, columns=columns)
+    else:
+        df = pd.DataFrame()
+
+    if df.empty:
+        expected_columns = [
+            "MC", "Operator", "NIK", "Tooling", "Kode Tooling", "Common Tooling Name",
+            "Part No", "Part Name", "Target", "Start", "Stop", "Desc",
+            "Qty", "Reject", "Rework", "Coil No", "Lot No", "Pack No", "Keterangan"
+        ]
+        df = pd.DataFrame(columns=expected_columns)
+
+    # Ensure default values for missing/null fields to maintain backward compatibility
+    if not df.empty:
+        # Handle NULL values for non-machine categories - replace with "-" as before
+        df["MC"] = df["MC"].fillna("-")
+        df["Tooling"] = df["Tooling"].fillna("-")
+        df["Kode Tooling"] = df["Kode Tooling"].fillna("-")
+        df["Common Tooling Name"] = df["Common Tooling Name"].fillna("-")
+        df["Part No"] = df["Part No"].fillna("-")
+        df["Part Name"] = df["Part Name"].fillna("-")
+        df["Target"] = df["Target"].fillna(0)
+
+        # Ensure default values for missing fields
+        for col in ["Coil No", "Lot No", "Pack No", "Keterangan"]:
+            df[col] = df[col].fillna("").replace("-", "")
+
+        # Apply the same transformations as the original function
+        df["Keterangan"] = df.apply(_generate_keterangan, axis=1)
+        df["Keterangan Limax"] = df.apply(_generate_keterangan_limax, axis=1)
+
+        df.drop(["Coil No", "Lot No", "Pack No"], axis=1, inplace=True)
+
+    return df
+
+
 def _convert_to_jakarta_time(timestamp, fmt="%m/%d/%Y %H:%M:%S"):
     """Converts UTC timestamp to Jakarta time and formats it."""
-    return (
-        pd.to_datetime(timestamp, utc=True)
-        .map(lambda x: x.tz_convert(_JAKARTA_TZ))
-        .dt.strftime(fmt)
-    )
+    ts = pd.to_datetime(timestamp)
+
+    # Handle both timezone-naive and timezone-aware timestamps
+    if ts.dt.tz is None:
+        # If timezone-naive, assume UTC
+        ts = ts.dt.tz_localize('UTC')
+
+    # Convert to Jakarta timezone and format
+    return ts.dt.tz_convert(_JAKARTA_TZ).dt.strftime(fmt)
 
 def _format_percent(value):
     """Formats percentage values to two decimal places."""
@@ -417,7 +528,7 @@ def df_to_report(df, report_category, filters, sort):
     if filters:
         df = _filter_df(df, filters)
 
-    if sort:
+    if sort and sort.sort_by:
         df = df.sort_values(by=[sort.sort_by], ascending=(sort.direction == "ascending"))
     else:
         df = df.sort_values(by=[primary_sort, "Start"]).reset_index(drop=True)
@@ -500,8 +611,13 @@ def get_report(
     if ("limax" in format.value) or (is_backup == True) :
         pagination = filters = sort = None
 
-    df = query_activity_mesin(time_from, time_to)
-    df = df_to_report(df, report_category, filters, sort)
+    # Use feature flag to switch between old and new query methods
+    if USE_ACTIVITY_REPORT_TABLE:
+        df = query_activity_report_optimized(time_from, time_to)
+        df = df_to_report_optimized(df, report_category, filters, sort)
+    else:
+        df = query_activity_mesin(time_from, time_to)
+        df = df_to_report(df, report_category, filters, sort)
     df = merge_consecutive_downtime(df, report_category)
 
     if pagination:
