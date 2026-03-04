@@ -176,10 +176,13 @@ def process_activity(activity, session):
         session.commit()
 
     # Step 4: Create a new ActivityMesin entry for the next activity
+    new_mesin_id = None if is_non_machine_category(next_category) else mesin_id
+    new_tooling_id = None if is_non_machine_category(next_category) else tooling_id
+
     new_activity = models.ActivityMesin(
-        mesin_id=mesin_id,
+        mesin_id=new_mesin_id,
         operator_id=operator_id,
-        tooling_id=tooling_id,
+        tooling_id=new_tooling_id,
         category=next_category,
         start_time_id=new_log.id,  # Set this new log as the start time
         stop_time_id=None,  # It has just started, so stop time remains NULL

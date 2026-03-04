@@ -110,31 +110,54 @@ def post_activity(activity: schema.Activity, session=Sessioner):
     4. Start a new activity with next category, the newly created mesin_log entry as start id, and null stop id
     """
 
-    # frontend is sending "null" instead of Null or None or empty string
     def normalize_null(value):
         """Convert 'null' (string), None, or empty strings to None."""
         return None if value in ["null", None, ""] else value
 
-    # Apply it to the fields
+    # Normalize inputs
     activity.curr_category = normalize_null(activity.curr_category)
     activity.mesin_id = normalize_null(activity.mesin_id)
     activity.tooling_id = normalize_null(activity.tooling_id)
 
-    if activity.mesin_id and activity.tooling_id:
-        # Validate that mesin, tooling, and operator exist
-        if not all([
-            session.query(models.Mesin).filter(models.Mesin.id == activity.mesin_id).first(),
-            session.query(models.Tooling).filter(models.Tooling.id == activity.tooling_id).first(),
-            session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first()
-        ]):
-            raise fastapi.HTTPException(404, "Invalid input")
-    else:
-        activity.mesin_id = None
-        activity.tooling_id = None
-        # Empty mesin_id and tooling_id mean "Mulai Aktivitas Baru" is chosen
-        if not session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first():
-            raise fastapi.HTTPException(404, "Invalid input")
+    # Operator must always exist
+    if not session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first():
+        raise fastapi.HTTPException(404, "Invalid operator_id")
 
+    # Decide whether curr/next are machine-related using your helper
+    curr_is_machine = (
+        activity.curr_category is not None and not business_logic.is_non_machine_category(activity.curr_category)
+    )
+    next_is_machine = not business_logic.is_non_machine_category(activity.next_category)
+
+    # If we're stopping a MACHINE curr_category, we must know which machine/tooling to stop
+    if curr_is_machine:
+        if not activity.mesin_id or not activity.tooling_id:
+            raise fastapi.HTTPException(
+                400,
+                f"mesin_id and tooling_id are required to stop curr_category '{activity.curr_category}'"
+            )
+
+    # If we're starting a MACHINE next_category (e.g. U : Utility), we must know which machine/tooling to start on
+    if next_is_machine:
+        if not activity.mesin_id or not activity.tooling_id:
+            raise fastapi.HTTPException(
+                400,
+                f"mesin_id and tooling_id are required to start next_category '{activity.next_category}'"
+            )
+
+    # Validate mesin/tooling existence if provided (or required)
+    if activity.mesin_id:
+        if not session.query(models.Mesin).filter(models.Mesin.id == activity.mesin_id).first():
+            raise fastapi.HTTPException(404, "Invalid mesin_id")
+
+    if activity.tooling_id:
+        if not session.query(models.Tooling).filter(models.Tooling.id == activity.tooling_id).first():
+            raise fastapi.HTTPException(404, "Invalid tooling_id")
+
+    # IMPORTANT: Do NOT set activity.mesin_id/tooling_id to None here.
+    # process_activity will decide what to store for the new activity row:
+    # - if next is non-machine: new ActivityMesin should have NULL mesin/tooling
+    # - if next is machine: must store mesin/tooling
     business_logic.process_activity(activity, session)
 
     return {"isSuccess": True}
@@ -220,8 +243,10 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
     return {
         "error": error,                 # Prevent operator from creating another entry on the same machine and tooling that he is currently active on
         "mesin_status": mesin_status,   # Used in ConfirmScreen to determine navigation
-        "operators_on_machine": operators_on_machine, # List of operators running on submitted mesin
-        "machines_by_operator": machines_by_operator, # List of mesin the submitted operator is running at
+        # "operators_on_machine": operators_on_machine, # List of operators running on submitted mesin
+        # "machines_by_operator": machines_by_operator, # List of mesin the submitted operator is running at
+        "operators_on_machine": [],
+        "machines_by_operator": [],
     }
 
 # ----- REPORT APIs ----- #
