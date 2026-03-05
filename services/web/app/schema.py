@@ -154,3 +154,8 @@ class ActivityStatusRequest(BaseModel):
 class ReportBackupRequest(BaseModel):
     month: Union[int, None] = None
     year: Union[int, None] = None
+
+class ReportBackfillRequest(BaseModel):
+    date_from: date
+    date_to: date
+    batch_size: int = 2000

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 import app.model.models as models
 import app.schema as schema
+import app.service.report as report
 
 # Kategori yang tidak melibatkan mesin
 # Dipakai di /operator/status supaya tidak usah menampilkan pilihan STOP untuk kategori ini
@@ -66,19 +67,23 @@ def get_machine_active_operators(mesin_id, exclude: list[str], session):
 
 def process_activity(activity, session):
     """
-    Handles machine activity transitions based on operator input.
+    Handles activity transitions and keeps atomic report facts in sync.
 
-    - Saves the current activity and next planned activity into `MesinLog`.
-    - Updates the previous `ActivityMesin` (if exists) by setting the stop time and saving results.
-    - Creates a new `ActivityMesin` for the next activity.
-
-    Ensures strict chronological tracking of machine operations and avoids overlapping activities.
+    Flow:
+    1) Create MesinLog event (timestamp marker for stop/start).
+    2) Stop any active NP activity for this operator.
+    3) Stop relevant active activities:
+       - Any active NON_MACHINE_CATEGORY for this operator, plus
+       - The selected current activity (optionally scoped by mesin/tooling if machine-related).
+       For stopped machine activities, also persist qty/reject/rework + details.
+    4) Upsert report facts for all stopped activities (atomic; no merging).
+    5) Start next ActivityMesin.
     """
 
-    # Empty tooling and mesin means user choose: Mulai Aktivitas Baru and then pick NP / BR / BT (non machine activity)
     tooling_id = activity.tooling_id
     mesin_id = activity.mesin_id
     operator_id = activity.operator_id
+
     output = activity.output
     reject = activity.reject
     rework = activity.rework
@@ -86,14 +91,11 @@ def process_activity(activity, session):
     lot_no = activity.lot_no
     pack_no = activity.pack_no
     keterangan = activity.keterangan
+
     curr_category = activity.curr_category
     next_category = activity.next_category
 
-    print(mesin_id)
-    print(tooling_id)
-    print(curr_category)
-
-    # Step 1: Insert new MesinLog entry
+    # 1) Insert new MesinLog entry (event marker)
     new_log = models.MesinLog(
         mesin_id=mesin_id,
         operator_id=operator_id,
@@ -102,92 +104,87 @@ def process_activity(activity, session):
         next_category=next_category,
     )
     session.add(new_log)
-    session.commit()
+    session.flush()  # get new_log.id without committing yet
 
-    # Step 2: Stop any NP activity
+    # 2) Stop any active NP activities for this operator
     np_activities = (
-    session.query(models.ActivityMesin)
+        session.query(models.ActivityMesin)
         .filter(
             models.ActivityMesin.operator_id == operator_id,
-            models.ActivityMesin.stop_time_id.is_(None),  # Only active activities
-            models.ActivityMesin.category.startswith("NP")  # Only NP activities
+            models.ActivityMesin.stop_time_id.is_(None),
+            models.ActivityMesin.category.startswith("NP"),
         )
         .all()
     )
+    for a in np_activities:
+        a.stop_time_id = new_log.id
 
-    # Stop NP activities by setting their stop_time_id
-    if np_activities:
-        for np_activity in np_activities:
-            np_activity.stop_time_id = new_log.id  # Use new log entry to mark the stop
-        session.commit()
-
-    # Step 3: Find the previous ongoing ActivityMesin entry
-    # There might be multiple non-machine related activities (BR, BT, and RP) that needs to be stopped all at once
-    # So for those, no need to filter by mesin
+    # 3) Stop selected ongoing activities (chosen + non-machine)
     base_active = and_(
         models.ActivityMesin.operator_id == operator_id,
         models.ActivityMesin.stop_time_id.is_(None),
     )
 
-    # Branch 1: any active NON_MACHINE_CATEGORY (no mesin/tooling restriction)
     non_machine_branch = and_(
         base_active,
         models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY),
     )
 
-    # Branch 2: the chosen category (optionally restricted by mesin/tooling)
-    chosen_branch_filters = [
+    chosen_filters = [
         base_active,
         models.ActivityMesin.category == curr_category,
     ]
 
-    # Only restrict mesin/tooling when the chosen category is a machine category
+    # only restrict mesin/tooling for machine categories
     if curr_category and curr_category not in NON_MACHINE_CATEGORY:
-        chosen_branch_filters.append(models.ActivityMesin.mesin_id == mesin_id)
+        chosen_filters.append(models.ActivityMesin.mesin_id == mesin_id)
         if tooling_id:
-            chosen_branch_filters.append(models.ActivityMesin.tooling_id == tooling_id)
+            chosen_filters.append(models.ActivityMesin.tooling_id == tooling_id)
 
-    chosen_branch = and_(*chosen_branch_filters)
+    chosen_branch = and_(*chosen_filters)
 
-    activities_to_stop_query = session.query(models.ActivityMesin).filter(
-        or_(chosen_branch, non_machine_branch)
+    activities_to_stop = (
+        session.query(models.ActivityMesin)
+        .filter(or_(chosen_branch, non_machine_branch))
+        .all()
     )
 
-    activities_to_stop = activities_to_stop_query.all()
+    for a in activities_to_stop:
+        a.stop_time_id = new_log.id
 
-    # Stop all selected activities
+        # non-machine: stop only (don’t overwrite details)
+        if a.category in NON_MACHINE_CATEGORY:
+            continue
+
+        # machine / chosen-category: persist production details
+        a.output = output
+        a.reject = reject
+        a.rework = rework
+        a.coil_no = coil_no
+        a.lot_no = lot_no
+        a.pack_no = pack_no
+        a.keterangan = keterangan
+
+    # Flush so upsert sees stop_time_id + stop_time relationship resolvable
+    session.flush()
+
+    # 4) Upsert report facts for stopped activities (atomic facts; includes NP/BT/BR)
     if activities_to_stop:
-        for activity in activities_to_stop:
-            activity.stop_time_id = new_log.id
+        report.upsert_report_facts_for_stopped_activities(activities_to_stop, session)
 
-            # For non-machine activities, only stop them (don't overwrite details)
-            if activity.category in NON_MACHINE_CATEGORY:
-                continue
-
-            # For machine / chosen-category activities, set the rest
-            activity.output = output
-            activity.reject = reject
-            activity.rework = rework
-            activity.coil_no = coil_no
-            activity.lot_no = lot_no
-            activity.pack_no = pack_no
-            activity.keterangan = keterangan
-
-        session.commit()
-
-    # Step 4: Create a new ActivityMesin entry for the next activity
-    new_mesin_id = None if is_non_machine_category(next_category) else mesin_id
-    new_tooling_id = None if is_non_machine_category(next_category) else tooling_id
-
+    # 5) Start the next activity
+    next_is_non_machine = is_non_machine_category(next_category)
     new_activity = models.ActivityMesin(
-        mesin_id=new_mesin_id,
+        mesin_id=None if next_is_non_machine else mesin_id,
         operator_id=operator_id,
-        tooling_id=new_tooling_id,
+        tooling_id=None if next_is_non_machine else tooling_id,
         category=next_category,
-        start_time_id=new_log.id,  # Set this new log as the start time
-        stop_time_id=None,  # It has just started, so stop time remains NULL
+        start_time_id=new_log.id,
+        stop_time_id=None,
     )
     session.add(new_activity)
+
+    # Single commit at the end keeps this whole transition consistent
     session.commit()
 
 

@@ -21,6 +21,7 @@ import app.cmd.db_ingestion as db_ingestion
 import app.cmd.backup_csv.backup as backup
 import app.cmd.get_id as get_id
 import app.cmd.mock_data as mock_data
+import app.cmd.backfill_report_facts as backfill_report_facts
 
 load_dotenv(".env")
 
@@ -309,9 +310,13 @@ def import_to_db():
     return True
 
 @app.get("/mock-data")
-async def mock_data_api():
-    mock_data.run_activity()
+async def mock_data_api(session=Sessioner):
+    mock_data.mock_data(session)
     return
+
+@app.post("/mock/seed-activities")
+def seed_mock_activities(session=Sessioner):
+    return mock_data.mock_activity(session)
 
 # ----- BACKUP APIs ----- #
 @app.post("/db-backup")
@@ -473,8 +478,13 @@ def get_activity_mesin(session=Sessioner):
 
 
 @app.get("/mesin-log/")
-def get_start(session=Sessioner):
+def get_mesin_log(session=Sessioner):
     mesin_log = session.query(models.MesinLog).all()
+    return mesin_log
+
+@app.get("/report-activity-fact/")
+def get_report_activity_fact(session=Sessioner):
+    mesin_log = session.query(models.ReportActivityFact).all()
     return mesin_log
 
 # ----- CREATE & UPDATE APIs ----- #
@@ -599,6 +609,29 @@ async def get_single_barcode(model: str, id: str, session=Sessioner):
         media_type="image/png",
         headers={"Content-Disposition": f'inline; filename="{model}_{id}_barcode.png"'},
     )
+
+@app.post("/report/backfill")
+def report_backfill(request: schema.ReportBackfillRequest, session=Sessioner):
+    time_from = request.date_from
+    time_to = request.date_to
+
+    if time_to <= time_from:
+        raise HTTPException(status_code=400, detail="date_to must be after date_from")
+
+    total = backfill_report_facts.backfill_range(
+        session=session,
+        time_from_utc=time_from,
+        time_to_utc=time_to,
+        batch_size=request.batch_size,
+    )
+
+    return {
+        "ok": True,
+        "date_from": time_from,
+        "date_to": time_to,
+        "batch_size": request.batch_size,
+        "total_backfilled": total,
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

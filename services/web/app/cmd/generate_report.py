@@ -1,186 +1,95 @@
 import os
-from datetime import datetime, time, timedelta
-from enum import Enum
 import calendar
+from datetime import datetime, timedelta
+from enum import Enum
 
 import numpy as np
 import pandas as pd
 import sqlalchemy as sa
-from sqlalchemy.orm import aliased
-import pytz
+from sqlalchemy.orm import aliased, joinedload
 
 import app.database as database
 import app.model.models as models
 import app.schema as schema
+import app.service.utils as ru
+import app.service.report as report
+import app.cmd.backfill_report_facts as backfill_report_facts
 
-"""
-All timezone-aware dates and times are stored internally in UTC.
-They are converted to local time in the zone specified by
-the timezone configuration parameter before being displayed to the client.
-"""
-_JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
-
-_WORKING_SHIFT_JSON = {
-    "Saturday": {"start": {"1": 7, "2": 12, "3": 17}, "duration": 5},
-    "Weekday": {"start": {"1": 7, "2": 15, "3": 23}, "duration": 8},
-}
+# ---------- Feature flag ----------
+# 0 = old path (ActivityMesin + MesinLog)
+# 1 = new path (ReportActivityFact)
+USE_REPORT_FACT_TABLE = True
 
 
-def _is_time_between(begin_time, end_time, check_time=None):
-    # If check time is not given, default to current timezone time
-    check_time = check_time or datetime.now(_JAKARTA_TZ).time()
-    if begin_time < end_time:
-        return check_time >= begin_time and check_time < end_time
-    else:  # crosses midnight
-        return check_time >= begin_time or check_time < end_time
+# ---------- DB session ----------
+engine = database.get_engine()
+SessionLocal = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def _calculate_shift(row):
-    date_time = datetime.strptime(row, "%m/%d/%Y %H:%M:%S")
-    return _calculate_shift_from_datetime(date_time)
+class ReportCategory(Enum):
+    MESIN = "mesin"
+    OPERATOR = "operator"
 
 
-def _calculate_shift_from_datetime(date_time):
-    comp_time = date_time.time()
-    if date_time.isoweekday() == 7:  # Sunday
-        return 1
-    else:
-        working_shift = _WORKING_SHIFT_JSON
-
-        day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
-        # Adjusting day based on time (for early morning considerations)
-        if comp_time < time(7, 0) and day_of_week == "Saturday":  # Before 7 AM Saturday
-            day_of_week = "Weekday"
-        duration = working_shift[day_of_week]["duration"]
-        for shift, timestamp in working_shift[day_of_week]["start"].items():
-            if _is_time_between(
-                time(timestamp, 00), time((timestamp + duration) % 24, 00), comp_time
-            ):
-                return int(shift)
-
-    return 1
-
-
-def get_curr_datetime():
-    return datetime.now(_JAKARTA_TZ).date()
-
-
-def get_curr_shift():
-    return _calculate_shift_from_datetime(datetime.now(_JAKARTA_TZ))
-
-
-def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
-    try:
-        date_from = date_from.date()
-        date_to = date_to.date()
-    except:
-        date_from = date_from
-        date_to = date_to
-
-    if date_from == date_to:
-        if shift_from == shift_to:
-            return f"result_{type}_{date_from}_shift_{shift_from}"
-        else:
-            return f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}"
-    else:
-        return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}"
-
-
-def _get_csv_folder(format, type, date_from, shift_from, date_to, shift_to):
-    filename = _get_csv_filename(type, date_from, shift_from, date_to, shift_to)
-    directory = f"data/report/{format}/{type}"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
-    return f"{directory}/{filename}"
-
-
-def _convert_seconds(seconds):
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-
-    if h > 0 and m > 0 and s > 0:
-        return f"{h:d}h {m:d}min {s:d}sec"
-    elif m > 0 and s > 0:
-        return f"{m:d}min {s:d}sec"
-    else:
-        return f"{s:d}sec"
-
-
-def _calculate_datetime_from_shift(date_time, shift):
-    year = date_time.year
-    month = date_time.month
-    day = date_time.day
-
-    hour_from = 0
-
-    if date_time.isoweekday() != 7:  # Not Sunday
-        working_shift = _WORKING_SHIFT_JSON
-
-        day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
-        hour_from = working_shift[day_of_week]["start"][shift]
-
-        # Get time in UTC (from GMT +7)
-        time_from = datetime(year, month, day, hour_from, 0) - timedelta(hours=7)
-        time_to = time_from + timedelta(hours=working_shift[day_of_week]["duration"])
-
-        return time_from, time_to
-
-    return datetime(year, month, day, 0, 0), datetime(year, month, day, 0, 0)
-
-
+# ---------- Date/shift helpers ----------
 def _correct_invalid_shift(shift):
     shift = max(int(shift), 1)
     shift = min(int(shift), 3)
     return str(shift)
 
 
-def _fill_default_datetime(
-    date_from=None, shift_from: str = "1", date_to=None, shift_to: str = "3"
-):
-    # Fill None dates with today's date
+def _fill_default_datetime(date_from=None, shift_from: str = "1", date_to=None, shift_to: str = "3"):
     if date_from is None and date_to is None:
-        date_from = date_to = datetime.now(_JAKARTA_TZ)
+        date_from = date_to = datetime.now(ru.JAKARTA_TZ)
     elif date_from is None:
         date_from = date_to
     elif date_to is None:
         date_to = date_from
 
-    if shift_from == None:
-        shift_from = "1"
-    if shift_to == None:
-        shift_to = "3"
+    shift_from = "1" if shift_from is None else shift_from
+    shift_to = "3" if shift_to is None else shift_to
 
     shift_from = _correct_invalid_shift(shift_from)
     shift_to = _correct_invalid_shift(shift_to)
 
-    # Make sure from < to
     if date_to < date_from:
         date_from, date_to = date_to, date_from
-    elif date_to == date_from:
-        if shift_to < shift_from:
-            shift_to, shift_from = shift_from, shift_to
+    elif date_to == date_from and shift_to < shift_from:
+        shift_to, shift_from = shift_from, shift_to
 
     return date_from, shift_from, date_to, shift_to
 
 
-def _calculate_datetime_range(
-    date_from=None, shift_from: str = "1", date_to=None, shift_to: str = "3"
-):
-    date_from, shift_from, date_to, shift_to = _fill_default_datetime(
-        date_from, shift_from, date_to, shift_to
-    )
+def _calculate_datetime_from_shift(date_time, shift):
+    """
+    Keep existing behavior:
+    shift boundaries are interpreted in Jakarta local time,
+    then converted to UTC by subtracting 7 hours.
+    """
+    year, month, day = date_time.year, date_time.month, date_time.day
+
+    if date_time.isoweekday() == 7:  # Sunday
+        return datetime(year, month, day, 0, 0), datetime(year, month, day, 0, 0)
+
+    day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
+    hour_from = ru.WORKING_SHIFT_JSON[day_of_week]["start"][shift]
+
+    time_from = datetime(year, month, day, hour_from, 0) - timedelta(hours=7)
+    time_to = time_from + timedelta(hours=ru.WORKING_SHIFT_JSON[day_of_week]["duration"])
+    return time_from, time_to
+
+
+def _calculate_datetime_range(date_from=None, shift_from: str = "1", date_to=None, shift_to: str = "3"):
+    date_from, shift_from, date_to, shift_to = _fill_default_datetime(date_from, shift_from, date_to, shift_to)
     time_from, _ = _calculate_datetime_from_shift(date_from, shift_from)
     _, time_to = _calculate_datetime_from_shift(date_to, shift_to)
-
     return time_from, time_to
 
 
 def _get_month_range(year=None, month=None):
     today = datetime.now()
-    if year is None or month is None:
-        year = year or today.year
-        month = month or today.month
+    year = year or today.year
+    month = month or today.month
 
     if year == 0:
         year = today.year
@@ -191,97 +100,123 @@ def _get_month_range(year=None, month=None):
     last_day = datetime(year, month, calendar.monthrange(year, month)[1], 23, 59, 59)
     return first_day, last_day, year, month
 
-def _generate_keterangan(row):
-    """
-    Generates a description string based on available Keterangan, Coil No, Lot No, and Pack No.
-    Ensures the result does not contain unnecessary trailing commas.
-    """
-    fields = [
-        f"Keterangan: {row['Keterangan']}" if row["Keterangan"] else "",
-        f"Coil No: {row['Coil No']}" if row["Coil No"] else "",
-        f"Lot No: {row['Lot No']}" if row["Lot No"] else "",
-        f"Pack No: {row['Pack No']}" if row["Pack No"] else "",
-    ]
 
-    return ", ".join(filter(None, fields))  # Filters out empty strings
-
-
-def _generate_keterangan_limax(row):
-    """
-    Extends _generate_keterangan by adding Reject and Rework details.
-    Ensures that the generated description does not contain unnecessary trailing commas.
-    """
-    fields = [
-        f"Reject: {row['Reject']}" if row["Reject"] else "",
-        f"Rework: {row['Rework']}" if row["Rework"] else "",
-    ]
-
-    return ", ".join(filter(None, fields + [_generate_keterangan(row)]))  # Concatenates and filters
-
-
-def _format_time_for_limax(time):
-    # Convert to limax hour format: HHMM
-    dt = datetime.strptime(time, "%H:%M:%S").strftime("%H%M")
-    # Convert 00 hour into 24
-    if dt[:2] == "00":
-        return f"24{dt[2:]}"
-    else:
-        return dt
-
-
-engine = database.get_engine()
-session = sa.orm.sessionmaker(autocommit=False, autoflush=False, bind=engine)()
-
-
-def _calculate_productivity(row):
-    if row["Desc"] != "U : Utility":
-        return 0
-
+def _get_csv_filename(type, date_from, shift_from, date_to, shift_to):
     try:
-        # Productivity (%) = (Output pcs / Waktu hr) / Target pcs/hr
-        productivity = ((row["Qty"] / (row["Duration"] / 3600.0)) / row["Target"]) * 100
-    except:
-        productivity = 0
-    return productivity
+        date_from = date_from.date()
+        date_to = date_to.date()
+    except Exception:
+        pass
+
+    if date_from == date_to:
+        if shift_from == shift_to:
+            return f"result_{type}_{date_from}_shift_{shift_from}"
+        return f"result_{type}_{date_from}_shift_{shift_from}_to_shift_{shift_to}"
+
+    return f"result_{type}_{date_from}_shift_{shift_from}_to_{date_to}_shift_{shift_to}"
 
 
-def _calculate_ratio(row, type):
-    # Qty is just qty of OK, not total
-    total = row["Qty"] + row["Reject"] + row["Rework"]
-    if total == 0:
-        return 0
-    return row[type] / total * 100
+def backup_filename(report_category: ReportCategory, format: schema.FormatType, year=None, month=None):
+    directory = "backup/report"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    if year is None or month is None:
+        now = datetime.now()
+        year = year or now.year
+        month = month or now.month
+
+    formatted_date = f"{year}_{month:02d}"
+    return f"{directory}/backup_{report_category.value}_{format.value}_{formatted_date}.csv"
 
 
-def _filter_df(df, filters):
+# ---------- Shared filters/sort/pagination ----------
+def _filter_df_numeric(df, filters):
+    """
+    Filters are applied to numeric columns.
+    Expected filter keys:
+    - Productivity
+    - Reject Ratio
+    - Rework Ratio
+    """
+    if not filters or df is None or df.empty:
+        return df
+
+    filter_column_map = {
+        "Productivity": "_ProductivityNum",
+        "Reject Ratio": "_RejectRatioNum",
+        "Rework Ratio": "_ReworkRatioNum",
+    }
+
     conditions = []
-
-    for field, filter_condition in filters.items():
-        if field not in ["Productivity", "Reject Ratio", "Rework Ratio"]:
+    for field, cond in filters.items():
+        if field not in filter_column_map:
             continue
-        if filter_condition.lt is not None:
-            conditions.append(df[field] <= filter_condition.lt)
-        if filter_condition.gt is not None:
-            conditions.append(df[field] >= filter_condition.gt)
+
+        col = filter_column_map[field]
+        if cond.lt is not None:
+            conditions.append(df[col] <= cond.lt)
+        if cond.gt is not None:
+            conditions.append(df[col] >= cond.gt)
 
     if conditions:
-        overall_condition = pd.concat(conditions, axis=1).all(axis=1)
-        df = df[overall_condition]
+        mask = pd.concat(conditions, axis=1).all(axis=1)
+        df = df[mask]
 
     return df
 
 
-def query_activity_mesin(time_from, time_to):
-    """
-    Query activity records from mesin_log and activity_mesin tables.
-    Fetches start/stop times, operators, tooling, and machine info.
-    """
+def _apply_sort(df, report_category, sort):
+    if df is None or df.empty:
+        return df
+
+    primary_sort = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
+
+    if sort:
+        sort_by = sort.sort_by
+
+        if sort_by in ["Productivity", "Reject Ratio", "Rework Ratio"]:
+            sort_by = {
+                "Productivity": "_ProductivityNum",
+                "Reject Ratio": "_RejectRatioNum",
+                "Rework Ratio": "_ReworkRatioNum",
+            }[sort_by]
+
+        return df.sort_values(by=[sort_by], ascending=(sort.direction == "ascending")).reset_index(drop=True)
+
+    return df.sort_values(by=[primary_sort, "_StartTs"]).reset_index(drop=True)
+
+
+def _apply_pagination(df, pagination):
+    if not pagination or df is None or df.empty:
+        return df
+
+    start = (pagination.page - 1) * pagination.page_size
+    end = pagination.page * pagination.page_size
+    return df.iloc[start:end]
+
+
+# ---------- Legacy path (ActivityMesin + MesinLog) ----------
+def get_report_legacy(session, report_category, time_from, time_to, filters, sort, pagination):
+    df = query_activity_mesin_legacy(session, time_from, time_to)
+    df = transform_legacy_report_df(df, report_category)
+
+    df = merge_consecutive_downtime(df, report_category)
+    df = _filter_df_numeric(df, filters)
+    df = _apply_sort(df, report_category, sort)
+    df = _apply_pagination(df, pagination)
+
+    df = ru.finalize_metric_strings(df)
+    return df
+
+
+def query_activity_mesin_legacy(session, time_from, time_to):
     activity_start = aliased(models.MesinLog)
     activity_stop = aliased(models.MesinLog)
 
     query = (
         session.query(
-            models.ActivityMesin.id,
+            models.ActivityMesin.id.label("ActivityMesinId"),
             models.Mesin.name.label("MC"),
             models.Operator.name.label("Operator"),
             models.Operator.nik.label("NIK"),
@@ -291,8 +226,8 @@ def query_activity_mesin(time_from, time_to):
             models.Tooling.part_no.label("Part No"),
             models.Tooling.part_name.label("Part Name"),
             models.Tooling.std_jam.label("Target"),
-            activity_start.timestamp.label("Start"),
-            activity_stop.timestamp.label("Stop"),
+            activity_start.timestamp.label("_StartTs"),
+            activity_stop.timestamp.label("_StopTs"),
             models.ActivityMesin.category.label("Desc"),
             models.ActivityMesin.output.label("Qty"),
             models.ActivityMesin.reject.label("Reject"),
@@ -300,7 +235,7 @@ def query_activity_mesin(time_from, time_to):
             models.ActivityMesin.coil_no.label("Coil No"),
             models.ActivityMesin.lot_no.label("Lot No"),
             models.ActivityMesin.pack_no.label("Pack No"),
-            models.ActivityMesin.keterangan.label("Keterangan"),
+            models.ActivityMesin.keterangan.label("KeteranganRaw"),
         )
         .outerjoin(models.Mesin, models.ActivityMesin.mesin_id == models.Mesin.id)
         .join(activity_start, models.ActivityMesin.start_time)
@@ -317,200 +252,293 @@ def query_activity_mesin(time_from, time_to):
     df = pd.DataFrame(result.fetchall(), columns=result.keys())
 
     if df.empty:
-        expected_columns = [
-            "MC", "Operator", "NIK", "Tooling", "Kode Tooling", "Common Tooling Name",
-            "Part No", "Part Name", "Target", "Start", "Stop", "Desc",
-            "Qty", "Reject", "Rework", "Coil No", "Lot No", "Pack No", "Keterangan"
-        ]
-        df = pd.DataFrame(columns=expected_columns)
+        return pd.DataFrame(
+            columns=[
+                "MC", "Operator", "NIK", "Tooling", "Kode Tooling", "Common Tooling Name",
+                "Part No", "Part Name", "Target", "_StartTs", "_StopTs", "Desc",
+                "Qty", "Reject", "Rework", "Keterangan", "Keterangan Limax",
+            ]
+        )
 
-    # Ensure default values for missing fields
-    for col in ["Coil No", "Lot No", "Pack No", "Keterangan"]:
+    for col in ["Coil No", "Lot No", "Pack No", "KeteranganRaw"]:
         df[col] = df[col].fillna("").replace("-", "")
 
-    df["Keterangan"] = df.apply(_generate_keterangan, axis=1)
-    df["Keterangan Limax"] = df.apply(_generate_keterangan_limax, axis=1)
-
-    df.drop(["Coil No", "Lot No", "Pack No"], axis=1, inplace=True)
-
-    return df
-
-def _convert_to_jakarta_time(timestamp, fmt="%m/%d/%Y %H:%M:%S"):
-    """Converts UTC timestamp to Jakarta time and formats it."""
-    return (
-        pd.to_datetime(timestamp, utc=True)
-        .map(lambda x: x.tz_convert(_JAKARTA_TZ))
-        .dt.strftime(fmt)
+    df["Keterangan"] = df.apply(
+        lambda row: ru.combine_keterangan_final(
+            row["KeteranganRaw"],
+            row["Coil No"],
+            row["Lot No"],
+            row["Pack No"],
+        ),
+        axis=1,
     )
 
-def _format_percent(value):
-    """Formats percentage values to two decimal places."""
-    return f"{value:.2f}%"
+    df["Keterangan Limax"] = df.apply(
+        lambda row: ru.build_keterangan_limax(int(row["Reject"] or 0), int(row["Rework"] or 0), row["Keterangan"]),
+        axis=1,
+    )
 
-def _insert_missing_records(df):
-    """Handles missing 'Not Known' (NK) records for operator reports."""
-    df = df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
+    df.drop(columns=["Coil No", "Lot No", "Pack No", "KeteranganRaw"], inplace=True)
+    return df
 
-    for index in range(1, len(df)):
-        same_operator = df.loc[index, "Operator"] == df.loc[index - 1, "Operator"]
-        start_mismatch = df.loc[index, "Start"] != df.loc[index - 1, "Stop"]
 
-        # Insert NK when there's a gap, excluding No Plan (NP) and Break Time (BT)
-        if same_operator and start_mismatch and df.loc[index, "Desc"][:2] not in ["NP", "BT"]:
-            insert_row = {
-                "Operator": df.loc[index]["Operator"],
-                "Start": df.loc[index - 1]["Stop"],
-                "Stop": df.loc[index]["Start"],
-                "Desc": "NK : Not Known",
-            }
-            df = pd.concat([df, pd.DataFrame([insert_row])])
+def transform_legacy_report_df(df, report_category):
+    if df is None or df.empty:
+        return df
 
-        # Ensure previous stop matches next start
-        if same_operator and start_mismatch:
-            df.loc[index - 1, "Stop"] = df.loc[index]["Start"]
-
-    return df.sort_values(by=["Operator", "Start"]).reset_index(drop=True)
-
-def df_to_report(df, report_category, filters, sort):
-    """Transforms the raw DataFrame into a structured report format."""
-    df["Tanggal"] = _convert_to_jakarta_time(df.Start, "%d/%m/%Y")
-    df["StartTime"] = _convert_to_jakarta_time(df.Start, "%H:%M:%S")
-    df["StopTime"] = _convert_to_jakarta_time(df.Stop, "%H:%M:%S")
-    df["Start"] = _convert_to_jakarta_time(df.Start)
-    df["Stop"] = _convert_to_jakarta_time(df.Stop)
-    df["Shift"] = df["Start"].apply(lambda x: _calculate_shift(x))
+    df = df.copy()
 
     if report_category == ReportCategory.OPERATOR:
-        df.drop(df[df["Desc"] == "NP : No Plan"].index, inplace=True)
+        df = df[df["Desc"] != "NP : No Plan"].copy()
 
-    # Operator BT and BR are non mesin and tooling related downtime
-    # So the MC and Tooling are `0`
-    columns_to_replace = [
-        "MC", "Tooling", "Kode Tooling", "Common Tooling Name", "Part No", "Part Name"
-    ]
+    columns_to_replace = ["MC", "Tooling", "Kode Tooling", "Common Tooling Name", "Part No", "Part Name"]
     df.loc[:, columns_to_replace] = df.loc[:, columns_to_replace].replace([0, None, np.nan], "-")
 
     if report_category == ReportCategory.MESIN:
-        df = df[df["MC"] != "-"]  # Remove empty machine entries
+        df = df[df["MC"] != "-"].copy()
 
-    # Compute and format duration
-    df["Duration"] = (pd.to_datetime(df.Stop) - pd.to_datetime(df.Start)).dt.total_seconds()
-    df["Duration"] = df["Duration"].apply(_convert_seconds)
-
-    # Compute key metrics
-    df["Productivity"] = df.apply(_calculate_productivity, axis=1)
-    df["Reject Ratio"] = df.apply(_calculate_ratio, type="Reject", axis=1)
-    df["Rework Ratio"] = df.apply(_calculate_ratio, type="Rework", axis=1)
-
-    # Convert percentages to formatted strings
-    df["Productivity"] = df["Productivity"].map(_format_percent)
-    df["Reject Ratio"] = df["Reject Ratio"].map(_format_percent)
-    df["Rework Ratio"] = df["Rework Ratio"].map(_format_percent)
-
-    # Fill missing values with 0 and convert numeric columns
-    df = df.fillna(0)
-    df[["Qty", "Reject", "Rework"]] = df[["Qty", "Reject", "Rework"]].astype(int)
-
-    # Sorting logic
-    primary_sort = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
-
-    if filters:
-        df = _filter_df(df, filters)
-
-    if sort:
-        df = df.sort_values(by=[sort.sort_by], ascending=(sort.direction == "ascending"))
-    else:
-        df = df.sort_values(by=[primary_sort, "Start"]).reset_index(drop=True)
-
-    # Additional columns
-    df["Plant"] = df["MC"].apply(lambda mc: mc[-1])
-    df["Awal"] = df["StartTime"].apply(_format_time_for_limax)
-    df["Akhir"] = df["StopTime"].apply(_format_time_for_limax)
-
-    df["Kode Keterangan"] = df["Desc"].apply(lambda desc: desc[:2].strip())
-
-    df.drop(columns=["Start", "Stop"], inplace=True)
+    # build derived fields from raw timestamps (not string conversions)
+    df = ru.normalize_report_df(df)
+    df = ru.add_numeric_metrics(df)
 
     return df
 
-def merge_consecutive_downtime(df, report_category):
-    """
-    Merge consecutive downtime events that belong to the same machine (for mesin report)
-    or the same operator (for operator report) with the same category (Desc).
 
-    - Takes the **earliest StartTime** and **latest StopTime** for consecutive entries.
-    - Works only when there is a downtime event (`Desc` is the same).
-    """
-
-    # Determine which column to use for grouping (MC for mesin, Operator for operator)
-    group_col = "MC" if report_category == ReportCategory.MESIN else "Operator"
-
-    # Sort by the grouping column and start time
-    df = df.sort_values(by=[group_col, "StartTime"]).reset_index(drop=True)
-
-    merged_rows = []
-    prev_row = None
-
-    for _, row in df.iterrows():
-        if prev_row is not None:
-            # Check if the downtime (Desc) and group_col (MC or Operator) are the same as previous
-            if row[group_col] == prev_row[group_col] and row["Desc"] == prev_row["Desc"] and row["Tooling"] == prev_row["Tooling"]:
-                # Update the previous row's StopTime to the latest one
-                prev_row["StopTime"] = max(prev_row["StopTime"], row["StopTime"])
-                continue  # Skip adding a new row, just update previous
-
-        # If the condition is not met, append the previous row to the final list
-        if prev_row is not None:
-            merged_rows.append(prev_row)
-
-        prev_row = row.copy()  # Move to next row
-
-    # Append the last processed row
-    if prev_row is not None:
-        merged_rows.append(prev_row)
-
-    return pd.DataFrame(merged_rows)
-
-class ReportCategory(Enum):
-    MESIN = "mesin"
-    OPERATOR = "operator"
-
-
-def get_report(
-    report_category: ReportCategory,
-    format: schema.FormatType = schema.FormatType.LIMAX,
-    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None,
-    pagination=None, filters=None, sort=None,
-    is_backup=None, backup_year=None, backup_month=None
-):
-    date_from, shift_from, date_to, shift_to = _fill_default_datetime(
-        date_time_from, shift_from, date_time_to, shift_to
+# ---------- New path (ReportActivityFact) ----------
+def get_report_from_fact_table(session, report_category, time_from, time_to, filters, sort, pagination):
+    query = (
+        session.query(models.ReportActivityFact)
+        .filter(models.ReportActivityFact.start_ts_utc >= time_from)
+        .filter(models.ReportActivityFact.start_ts_utc < time_to)
+        .order_by(models.ReportActivityFact.start_ts_utc.asc())
     )
 
+    if report_category == ReportCategory.MESIN:
+        query = query.filter(models.ReportActivityFact.mesin_id.isnot(None))
 
-    if not is_backup:
-        time_from, time_to = _calculate_datetime_range(
-            date_from=date_from, shift_from=shift_from,
-            date_to=date_to, shift_to=shift_to,
-        )
-    else:
-        time_from, time_to, backup_year, backup_month = _get_month_range(backup_year, backup_month)
+    rows = query.all()
+    if not rows:
+        return pd.DataFrame()
 
+    df = pd.DataFrame(
+        [
+            {
+                "ActivityMesinId": r.activity_mesin_id,
+                "MC": r.mc_name if r.mc_name else "-",
+                "Operator": r.operator_name if r.operator_name else "-",
+                "NIK": r.operator_nik if r.operator_nik else "-",
+                "Tooling": r.tooling_id if r.tooling_id else "-",
+                "Kode Tooling": r.kode_tooling if r.kode_tooling else "-",
+                "Common Tooling Name": r.common_tooling_name if r.common_tooling_name else "-",
+                "Part No": r.part_no if r.part_no else "-",
+                "Part Name": r.part_name if r.part_name else "-",
+                "Target": r.target_std_jam if r.target_std_jam else 0,
+                "_StartTs": r.start_ts_utc,
+                "_StopTs": r.stop_ts_utc,
+                "Desc": r.category_full,
+                "Qty": int(r.qty or 0),
+                "Reject": int(r.reject or 0),
+                "Rework": int(r.rework or 0),
+                "Keterangan": r.keterangan_final or "",
+                "Keterangan Limax": ru.build_keterangan_limax(int(r.reject or 0), int(r.rework or 0), r.keterangan_final or ""),
+                "_ProductivityNum": float(r.productivity_pct or 0),
+                "_RejectRatioNum": float(r.reject_ratio_pct or 0),
+                "_ReworkRatioNum": float(r.rework_ratio_pct or 0),
+            }
+            for r in rows
+        ]
+    )
 
-    if ("limax" in format.value) or (is_backup == True) :
-        pagination = filters = sort = None
+    if report_category == ReportCategory.OPERATOR:
+        df = df[df["Desc"] != "NP : No Plan"].copy()
 
-    df = query_activity_mesin(time_from, time_to)
-    df = df_to_report(df, report_category, filters, sort)
+    df = ru.normalize_report_df(df)
+
     df = merge_consecutive_downtime(df, report_category)
+    df = _filter_df_numeric(df, filters)
+    df = _apply_sort(df, report_category, sort)
+    df = _apply_pagination(df, pagination)
 
-    if pagination:
-        df = df.iloc[(pagination.page - 1) * pagination.page_size : pagination.page * pagination.page_size]
+    df = ru.finalize_metric_strings(df)
+    return df
 
+# ---------- Lazy fact backfill helpers ----------
+def _get_source_activity_ids_in_range(session, time_from, time_to):
+    """
+    Return finished ActivityMesin ids whose START timestamp is in [time_from, time_to).
+    This matches legacy report behavior.
+    """
+    return [
+        row[0]
+        for row in (
+            session.query(models.ActivityMesin.id)
+            .join(models.MesinLog, models.ActivityMesin.start_time_id == models.MesinLog.id)
+            .filter(models.MesinLog.timestamp >= time_from)
+            .filter(models.MesinLog.timestamp < time_to)
+            .filter(models.ActivityMesin.stop_time_id.isnot(None))
+            .order_by(models.ActivityMesin.id.asc())
+            .all()
+        )
+    ]
+
+
+def _get_fact_activity_ids_in_range(session, time_from, time_to):
+    """
+    Return activity_mesin_id values already present in report_activity_fact
+    for rows whose start_ts_utc is in [time_from, time_to).
+    """
+    return {
+        row[0]
+        for row in (
+            session.query(models.ReportActivityFact.activity_mesin_id)
+            .filter(models.ReportActivityFact.start_ts_utc >= time_from)
+            .filter(models.ReportActivityFact.start_ts_utc < time_to)
+            .all()
+        )
+    }
+
+
+def _ensure_fact_rows_for_range(session, time_from, time_to, max_backfill_rows=1000):
+    """
+    Smart lazy backfill.
+
+    Case A: fully backfilled
+    - source count == fact count
+    - no backfill
+    - use new path
+
+    Case B: partially backfilled, small gap
+    - source count > fact count
+    - backfill missing rows up to max_backfill_rows
+    - after backfill, complete
+    - use new path
+
+    Case C: partially backfilled, big gap
+    - source count > fact count
+    - backfill only first max_backfill_rows missing rows
+    - still incomplete
+    - fallback to legacy
+    - avoids partial result
+    """
+    source_ids = _get_source_activity_ids_in_range(session, time_from, time_to)
+    source_count = len(source_ids)
+
+    if source_count == 0:
+        return {
+            "source_count": 0,
+            "fact_count_before": 0,
+            "backfilled_count": 0,
+            "remaining_missing_count": 0,
+        }
+
+    fact_ids = _get_fact_activity_ids_in_range(session, time_from, time_to)
+    fact_count_before = len(fact_ids)
+
+    # Case A: fully backfilled
+    if fact_count_before >= source_count:
+        return {
+            "source_count": source_count,
+            "fact_count_before": fact_count_before,
+            "backfilled_count": 0,
+            "remaining_missing_count": 0,
+        }
+
+    # Case B / C: partially backfilled
+    missing_ids = [activity_id for activity_id in source_ids if activity_id not in fact_ids]
+    ids_to_backfill = missing_ids[:max_backfill_rows]
+
+    if ids_to_backfill:
+        activities = (
+            session.query(models.ActivityMesin)
+            .options(
+                joinedload(models.ActivityMesin.start_time),
+                joinedload(models.ActivityMesin.stop_time),
+            )
+            .filter(models.ActivityMesin.id.in_(ids_to_backfill))
+            .order_by(models.ActivityMesin.id.asc())
+            .all()
+        )
+
+        if activities:
+            report.upsert_report_facts_for_stopped_activities(activities, session)
+            session.commit()
+
+    fact_ids_after = _get_fact_activity_ids_in_range(session, time_from, time_to)
+    remaining_missing_count = max(source_count - len(fact_ids_after), 0)
+
+    return {
+        "source_count": source_count,
+        "fact_count_before": fact_count_before,
+        "backfilled_count": len(ids_to_backfill),
+        "remaining_missing_count": remaining_missing_count,
+    }
+
+# ---------- Shared merge (fixed: recompute duration + metrics after merge) ----------
+def merge_consecutive_downtime(df, report_category):
+    if df is None or df.empty:
+        return df
+
+    group_col = "MC" if report_category == ReportCategory.MESIN else "Operator"
+    df = df.sort_values(by=[group_col, "_StartTs"]).reset_index(drop=True)
+
+    merged_rows = []
+    prev = None
+
+    def can_merge(a, b):
+        return (
+            a[group_col] == b[group_col]
+            and a["Desc"] == b["Desc"]
+            and a["Tooling"] == b["Tooling"]
+            and pd.Timestamp(a["_StopTs"]) == pd.Timestamp(b["_StartTs"])
+        )
+
+    def merge_two(a, b):
+        m = a.copy()
+        m["_StartTs"] = min(pd.Timestamp(a["_StartTs"]), pd.Timestamp(b["_StartTs"]))
+        m["_StopTs"] = max(pd.Timestamp(a["_StopTs"]), pd.Timestamp(b["_StopTs"]))
+
+        m["Qty"] = int(a["Qty"]) + int(b["Qty"])
+        m["Reject"] = int(a["Reject"]) + int(b["Reject"])
+        m["Rework"] = int(a["Rework"]) + int(b["Rework"])
+
+        if (not a["Target"]) and b["Target"]:
+            m["Target"] = b["Target"]
+
+        # keep both notes, de-dup
+        parts = [a.get("Keterangan", ""), b.get("Keterangan", "")]
+        parts = [x for x in parts if x]
+        m["Keterangan"] = " | ".join(dict.fromkeys(parts))
+        m["Keterangan Limax"] = ru.build_keterangan_limax(m["Reject"], m["Rework"], m["Keterangan"])
+
+        # recompute all derived fields + numeric metrics from merged timestamps
+        tmp = pd.DataFrame([m])
+        tmp = ru.normalize_report_df(tmp)
+        tmp = ru.add_numeric_metrics(tmp)
+        return tmp.iloc[0]
+
+    for _, row in df.iterrows():
+        if prev is None:
+            prev = row.copy()
+            continue
+
+        if can_merge(prev, row):
+            prev = merge_two(prev, row)
+        else:
+            merged_rows.append(prev)
+            prev = row.copy()
+
+    if prev is not None:
+        merged_rows.append(prev)
+
+    return pd.DataFrame(merged_rows).reset_index(drop=True)
+
+
+# ---------- Output builders ----------
+def build_output_frames(df, report_category, format, date_from, shift_from, date_to, shift_to, is_backup, backup_year, backup_month):
     sort_by_first = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
     sort_by_next = "MC" if report_category == ReportCategory.OPERATOR else "Operator"
 
-    # imn report
+    # ----- IMN output -----
     df_imn = df.copy(deep=True)
     imn_header = [
         sort_by_first, "Shift", "Tanggal", "StartTime", "StopTime", sort_by_next,
@@ -518,23 +546,16 @@ def get_report(
         "Reject", "Rework", "Desc", "Duration", "Productivity", "Reject Ratio", "Rework Ratio", "Keterangan",
     ]
 
-    # Ensure all required columns exist (add missing columns with default values)
     for col in imn_header:
         if col not in df_imn.columns:
-            df_imn[col] = "" if col in ["Desc", "Keterangan", "Duration", "Productivity", "Reject Ratio", "Rework Ratio",
-                                        "Tanggal", "StartTime", "StopTime", "Kode Tooling", "Common Tooling Name",
-                                        "Part No", "Part Name"] else 0
-
+            df_imn[col] = "" if col in [
+                "Desc", "Keterangan", "Duration", "Productivity", "Reject Ratio", "Rework Ratio",
+                "Tanggal", "StartTime", "StopTime", "Kode Tooling", "Common Tooling Name",
+                "Part No", "Part Name"
+            ] else 0
     df_imn = df_imn[imn_header]
 
-    # df_imn.to_csv(
-    #     _get_csv_folder(
-    #         format="imn", type=report_category.value, date_from=date_from,
-    #         shift_from=shift_from, date_to=date_to, shift_to=shift_to,
-    #     ), sep=";",
-    # )
-
-    # limax report
+    # ----- LIMAX output -----
     df_limax = df.copy(deep=True)
     limax_header = {
         "Tanggal": "STR_DATE",
@@ -550,126 +571,132 @@ def get_report(
         "Keterangan Limax": "STR_DESC",
     }
 
-    # Ensure all required columns exist for LIMAX format
     for original_col in limax_header.keys():
         if original_col not in df_limax.columns:
-            df_limax[original_col] = "" if original_col in ["Tanggal", "Kode Tooling", "Keterangan Limax", "Kode Keterangan", "Awal", "Akhir"] else 0
+            df_limax[original_col] = "" if original_col in [
+                "Tanggal", "Kode Tooling", "Keterangan Limax", "Kode Keterangan", "Awal", "Akhir"
+            ] else 0
 
     df_limax.rename(columns=limax_header, inplace=True)
-    limax_col = [
+    limax_cols = [
         "STR_DATE", "STR_PLNT", "TLG_CODE", "STR_KUAN", "PEG_CODE",
         "SHF_CODE", "MSN_CODE", "STR_AWAL", "STR_AKHR", "DWN_CODE", "STR_DESC",
     ]
-
-    # Ensure all LIMAX columns exist after renaming
-    for col in limax_col:
+    for col in limax_cols:
         if col not in df_limax.columns:
             df_limax[col] = ""
+    df_limax = df_limax[limax_cols].astype(str)
 
-    # Remove columns that are not in limax_col
-    for col in list(df_limax.columns):
-        if col not in limax_col:
-            df_limax.drop(columns=col, inplace=True)
-
-    df_limax = df_limax[limax_col].astype(str)
-
-    # df_limax.to_csv(
-    #     _get_csv_folder(
-    #         format="limax", type=report_category.value, date_from=date_from,
-    #         shift_from=shift_from, date_to=date_to, shift_to=shift_to,
-    #     ), sep=";", index=False,
-    # )
-
-    if is_backup == True:
-        filename = backup_filename(
-            report_category=report_category,
-            format=format,
-            year=backup_year,
-            month=backup_month,
-        )
+    # ----- Filename -----
+    if is_backup is True:
+        filename = backup_filename(report_category=report_category, format=format, year=backup_year, month=backup_month)
     else:
-        filename = _get_csv_filename(
-            report_category.value,
-            date_from=date_from, shift_from=shift_from,
-            date_to=date_to, shift_to=shift_to,
-        )
+        filename = _get_csv_filename(report_category.value, date_from, shift_from, date_to, shift_to)
 
-    if "limax" in format.value:
-        return df_limax, filename
+    return (df_limax, filename) if "limax" in format.value else (df_imn, filename)
+
+
+# ---------- Main entrypoint ----------
+def get_report(
+    report_category: ReportCategory,
+    format: schema.FormatType = schema.FormatType.LIMAX,
+    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None,
+    pagination=None, filters=None, sort=None,
+    is_backup=None, backup_year=None, backup_month=None,
+):
+    date_from, shift_from, date_to, shift_to = _fill_default_datetime(date_time_from, shift_from, date_time_to, shift_to)
+
+    if not is_backup:
+        time_from, time_to = _calculate_datetime_range(date_from, shift_from, date_to, shift_to)
     else:
-        return df_imn, filename
+        time_from, time_to, backup_year, backup_month = _get_month_range(backup_year, backup_month)
+
+    # keep behavior: limax export and backup disables pagination/filters/sort
+    if ("limax" in format.value) or (is_backup is True):
+        pagination = filters = sort = None
+
+    with SessionLocal() as session:
+        use_new = USE_REPORT_FACT_TABLE and (not is_backup)
+
+        if use_new:
+            backfill_result = _ensure_fact_rows_for_range(
+                session=session,
+                time_from=time_from,
+                time_to=time_to,
+                max_backfill_rows=1000,
+            )
+
+            print(
+                f"[report] source={backfill_result['source_count']} "
+                f"fact_before={backfill_result['fact_count_before']} "
+                f"backfilled={backfill_result['backfilled_count']} "
+                f"remaining_missing={backfill_result['remaining_missing_count']}"
+            )
+
+            # Case A: fully backfilled
+            # source count == fact count, no backfill,
+            # use new path
+            #
+            # Case B: partially backfilled, small gap
+            # source count > fact count, backfill missing rows up to 1000, after backfill, complete,
+            # use new path
+            #
+            # Case C: partially backfilled, big gap
+            # source count > fact count, backfill only first 1000 missing rows, still incomplete,
+            # fallback to legacy, avoids partial result
+
+            # Safety fallback:
+            # if there are still missing rows after lazy backfill,
+            # use legacy so we never return a partial report.
+            if backfill_result["remaining_missing_count"] > 0:
+                df = get_report_legacy(
+                    session=session,
+                    report_category=report_category,
+                    time_from=time_from,
+                    time_to=time_to,
+                    filters=filters,
+                    sort=sort,
+                    pagination=pagination,
+                )
+            else:
+                df = get_report_from_fact_table(
+                    session=session,
+                    report_category=report_category,
+                    time_from=time_from,
+                    time_to=time_to,
+                    filters=filters,
+                    sort=sort,
+                    pagination=pagination,
+                )
+        else:
+            df = get_report_legacy(
+                session=session,
+                report_category=report_category,
+                time_from=time_from,
+                time_to=time_to,
+                filters=filters,
+                sort=sort,
+                pagination=pagination,
+            )
+
+    return build_output_frames(df, report_category, format, date_from, shift_from, date_to, shift_to, is_backup, backup_year, backup_month)
 
 
 def get_mesin_report(
     format: schema.FormatType,
-    date_time_from: datetime = None,
-    shift_from: int = None,
-    date_time_to: datetime = None,
-    shift_to: int = None,
-    pagination=None,
-    filters=None,
-    sort=None,
+    date_time_from: datetime = None, shift_from: int = None,
+    date_time_to: datetime = None, shift_to: int = None,
+    pagination=None, filters=None, sort=None,
     is_backup=None, backup_year=None, backup_month=None,
 ):
-    return get_report(
-        ReportCategory.MESIN,
-        format,
-        date_time_from,
-        shift_from,
-        date_time_to,
-        shift_to,
-        pagination,
-        filters,
-        sort,
-        is_backup,
-        backup_year,
-        backup_month,
-    )
+    return get_report(ReportCategory.MESIN, format, date_time_from, shift_from, date_time_to, shift_to, pagination, filters, sort, is_backup, backup_year, backup_month)
 
 
 def get_operator_report(
     format: schema.FormatType,
-    date_time_from: datetime = None,
-    shift_from: int = None,
-    date_time_to: datetime = None,
-    shift_to: int = None,
-    pagination=None,
-    filters=None,
-    sort=None,
+    date_time_from: datetime = None, shift_from: int = None,
+    date_time_to: datetime = None, shift_to: int = None,
+    pagination=None, filters=None, sort=None,
     is_backup=None, backup_year=None, backup_month=None,
 ):
-    return get_report(
-        ReportCategory.OPERATOR,
-        format,
-        date_time_from,
-        shift_from,
-        date_time_to,
-        shift_to,
-        pagination,
-        filters,
-        sort,
-        is_backup,
-        backup_year,
-        backup_month,
-    )
-
-def backup_filename(report_category: ReportCategory,
-    format: schema.FormatType,
-    year=None, month=None):
-
-    directory = f"backup/report"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
-    if year is None or month is None:
-        now = datetime.now()
-        year = year or now.year
-        month = month or now.month
-
-    formatted_date = f"{year}_{month:02d}"
-    filename = f"{directory}/backup_{report_category.value}_{format}_{formatted_date}.csv"
-    return filename
-
-if __name__ == "__main__":
-    get_mesin_report(date_time_from=datetime(2023, 6, 14, 0, 0, 0))
-    get_operator_report(date_time_from=datetime(2023, 6, 14, 0, 0, 0))
+    return get_report(ReportCategory.OPERATOR, format, date_time_from, shift_from, date_time_to, shift_to, pagination, filters, sort, is_backup, backup_year, backup_month)

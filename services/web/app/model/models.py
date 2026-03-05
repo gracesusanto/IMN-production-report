@@ -141,3 +141,82 @@ class ActivityMesin(Base):
     time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
     time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
 
+class ReportActivityFact(Base):
+    """
+    Materialized / stored report facts.
+    1 row == 1 finished ActivityMesin (atomic interval).
+
+    NOTE:
+    - This is NOT merged downtime. Merging stays at query/presentation layer.
+    - Source of truth remains MesinLog + ActivityMesin.
+    """
+    __tablename__ = "report_activity_fact"
+
+    id = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+
+    # One-to-one with ActivityMesin (atomic)
+    activity_mesin_id = sa.Column(
+        sa.Integer,
+        sa.ForeignKey("activity_mesin.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    # Core timestamps (timestamptz)
+    start_ts_utc = sa.Column(sa.DateTime(timezone=True), nullable=False, index=True)
+    stop_ts_utc = sa.Column(sa.DateTime(timezone=True), nullable=False, index=True)
+    duration_sec = sa.Column(sa.Integer, nullable=False, index=True)
+
+    # Keys (nullable for non-machine categories like NP/BT/BR)
+    operator_id = sa.Column(sa.String, sa.ForeignKey("operator.id"), nullable=False, index=True)
+    mesin_id = sa.Column(sa.String, sa.ForeignKey("mesin.id"), nullable=True, index=True)
+    tooling_id = sa.Column(sa.String, sa.ForeignKey("tooling.id"), nullable=True, index=True)
+
+    category_full = sa.Column(sa.String, nullable=False)
+    category_code = sa.Column(sa.String(2), nullable=False, index=True)
+
+    # Output
+    qty = sa.Column(sa.Integer, nullable=False, server_default="0")
+    reject = sa.Column(sa.Integer, nullable=False, server_default="0")
+    rework = sa.Column(sa.Integer, nullable=False, server_default="0")
+
+    # Final combined text (your choice)
+    keterangan_final = sa.Column(sa.Text, nullable=False, server_default="")
+
+    # Denormalized snapshots (keep reports stable if names/targets change later)
+    mc_name = sa.Column(sa.String, nullable=True)
+    operator_name = sa.Column(sa.String, nullable=False, server_default="")
+    operator_nik = sa.Column(sa.String, nullable=False, server_default="")
+
+    kode_tooling = sa.Column(sa.String, nullable=True)
+    common_tooling_name = sa.Column(sa.String, nullable=True)
+    part_no = sa.Column(sa.String, nullable=True)
+    part_name = sa.Column(sa.String, nullable=True)
+    target_std_jam = sa.Column(sa.Integer, nullable=True)
+
+    # Derived for fast summary/group/filter
+    # tanggal_local = Jakarta date (date only)
+    tanggal_local = sa.Column(sa.Date, nullable=False, index=True)
+    shift = sa.Column(sa.SmallInteger, nullable=False, index=True)
+
+    # Optional convenience (Limax / your logic)
+    plant = sa.Column(sa.String(4), nullable=True)
+    awal_hhmm = sa.Column(sa.String(4), nullable=True)
+    akhir_hhmm = sa.Column(sa.String(4), nullable=True)
+
+    # Stored as numbers for filtering (NOT formatted strings)
+    # Use Numeric to avoid float drift
+    productivity_pct = sa.Column(sa.Numeric(18, 4), nullable=False, server_default="0")
+    reject_ratio_pct = sa.Column(sa.Numeric(18, 4), nullable=False, server_default="0")
+    rework_ratio_pct = sa.Column(sa.Numeric(18, 4), nullable=False, server_default="0")
+
+    time_created = sa.Column(sa.DateTime(timezone=True), server_default=sa.sql.func.now())
+    time_updated = sa.Column(sa.DateTime(timezone=True), onupdate=sa.sql.func.now())
+
+    __table_args__ = (
+        # Typical report access patterns
+        sa.Index("ix_report_fact_date_shift", "tanggal_local", "shift"),
+        sa.Index("ix_report_fact_op_date_shift", "operator_id", "tanggal_local", "shift"),
+        sa.Index("ix_report_fact_mc_date_shift", "mesin_id", "tanggal_local", "shift"),
+    )
