@@ -617,57 +617,16 @@ def get_report(
 
     with SessionLocal() as session:
         use_new = USE_REPORT_FACT_TABLE and (not is_backup)
-
         if use_new:
-            backfill_result = _ensure_fact_rows_for_range(
+            df = get_report_from_fact_table(
                 session=session,
+                report_category=report_category,
                 time_from=time_from,
                 time_to=time_to,
-                max_backfill_rows=1000,
+                filters=filters,
+                sort=sort,
+                pagination=pagination,
             )
-
-            print(
-                f"[report] source={backfill_result['source_count']} "
-                f"fact_before={backfill_result['fact_count_before']} "
-                f"backfilled={backfill_result['backfilled_count']} "
-                f"remaining_missing={backfill_result['remaining_missing_count']}"
-            )
-
-            # Case A: fully backfilled
-            # source count == fact count, no backfill,
-            # use new path
-            #
-            # Case B: partially backfilled, small gap
-            # source count > fact count, backfill missing rows up to 1000, after backfill, complete,
-            # use new path
-            #
-            # Case C: partially backfilled, big gap
-            # source count > fact count, backfill only first 1000 missing rows, still incomplete,
-            # fallback to legacy, avoids partial result
-
-            # Safety fallback:
-            # if there are still missing rows after lazy backfill,
-            # use legacy so we never return a partial report.
-            if backfill_result["remaining_missing_count"] > 0:
-                df = get_report_legacy(
-                    session=session,
-                    report_category=report_category,
-                    time_from=time_from,
-                    time_to=time_to,
-                    filters=filters,
-                    sort=sort,
-                    pagination=pagination,
-                )
-            else:
-                df = get_report_from_fact_table(
-                    session=session,
-                    report_category=report_category,
-                    time_from=time_from,
-                    time_to=time_to,
-                    filters=filters,
-                    sort=sort,
-                    pagination=pagination,
-                )
         else:
             df = get_report_legacy(
                 session=session,
@@ -678,6 +637,68 @@ def get_report(
                 sort=sort,
                 pagination=pagination,
             )
+
+        if False:
+            if use_new:
+                backfill_result = _ensure_fact_rows_for_range(
+                    session=session,
+                    time_from=time_from,
+                    time_to=time_to,
+                    max_backfill_rows=1000,
+                )
+
+                print(
+                    f"[report] source={backfill_result['source_count']} "
+                    f"fact_before={backfill_result['fact_count_before']} "
+                    f"backfilled={backfill_result['backfilled_count']} "
+                    f"remaining_missing={backfill_result['remaining_missing_count']}"
+                )
+
+                # Case A: fully backfilled
+                # source count == fact count, no backfill,
+                # use new path
+                #
+                # Case B: partially backfilled, small gap
+                # source count > fact count, backfill missing rows up to 1000, after backfill, complete,
+                # use new path
+                #
+                # Case C: partially backfilled, big gap
+                # source count > fact count, backfill only first 1000 missing rows, still incomplete,
+                # fallback to legacy, avoids partial result
+
+                # Safety fallback:
+                # if there are still missing rows after lazy backfill,
+                # use legacy so we never return a partial report.
+                if backfill_result["remaining_missing_count"] > 0:
+                    df = get_report_legacy(
+                        session=session,
+                        report_category=report_category,
+                        time_from=time_from,
+                        time_to=time_to,
+                        filters=filters,
+                        sort=sort,
+                        pagination=pagination,
+                    )
+                else:
+                    df = get_report_from_fact_table(
+                        session=session,
+                        report_category=report_category,
+                        time_from=time_from,
+                        time_to=time_to,
+                        filters=filters,
+                        sort=sort,
+                        pagination=pagination,
+                    )
+            else:
+                df = get_report_legacy(
+                    session=session,
+                    report_category=report_category,
+                    time_from=time_from,
+                    time_to=time_to,
+                    filters=filters,
+                    sort=sort,
+                    pagination=pagination,
+                )
 
     return build_output_frames(df, report_category, format, date_from, shift_from, date_to, shift_to, is_backup, backup_year, backup_month)
 
