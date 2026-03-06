@@ -263,6 +263,16 @@ def get_report(request: schema.ReportRequest):
         filters=request.filters,
         sort=request.sort,
     )
+
+    if request.format in {
+        schema.FormatType.IMN_DASHBOARD,
+        schema.FormatType.LIMAX_DASHBOARD,
+    }:
+        return generate_report.build_dashboard_preview_response(
+            df,
+            pagination=request.pagination,
+        )
+
     return business_logic.generate_report_response(df, filename, request.format)
 
 @app.post("/report/operator")
@@ -277,6 +287,16 @@ def get_report(request: schema.ReportRequest):
         filters=request.filters,
         sort=request.sort,
     )
+
+    if request.format in {
+        schema.FormatType.IMN_DASHBOARD,
+        schema.FormatType.LIMAX_DASHBOARD,
+    }:
+        return generate_report.build_dashboard_preview_response(
+            df,
+            pagination=request.pagination,
+        )
+
     return business_logic.generate_report_response(df, filename, request.format)
 
 # ----- MODEL DATA CSV EXPORT API ----- #

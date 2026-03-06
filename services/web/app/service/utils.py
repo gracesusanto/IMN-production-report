@@ -239,8 +239,13 @@ def finalize_metric_strings(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return df
 
-    df = df.copy()
-    df["Productivity"] = df["_ProductivityNum"].apply(format_percent_2dp)
-    df["Reject Ratio"] = df["_RejectRatioNum"].apply(format_percent_2dp)
-    df["Rework Ratio"] = df["_ReworkRatioNum"].apply(format_percent_2dp)
+    if "_ProductivityNum" in df.columns:
+        df["Productivity"] = df["_ProductivityNum"].apply(format_percent_2dp)
+
+    if "_RejectRatioNum" in df.columns:
+        df["Reject Ratio"] = df["_RejectRatioNum"].apply(format_percent_2dp)
+
+    if "_ReworkRatioNum" in df.columns:
+        df["Rework Ratio"] = df["_ReworkRatioNum"].apply(format_percent_2dp)
+
     return df

@@ -12,6 +12,7 @@ import app.database as database
 import app.model.models as models
 import app.schema as schema
 import app.service.utils as ru
+import app.service.filter_utils as fu
 import app.service.report as report
 import app.cmd.backfill_report_facts as backfill_report_facts
 
@@ -129,62 +130,51 @@ def backup_filename(report_category: ReportCategory, format: schema.FormatType, 
     formatted_date = f"{year}_{month:02d}"
     return f"{directory}/backup_{report_category.value}_{format.value}_{formatted_date}.csv"
 
-
-# ---------- Shared filters/sort/pagination ----------
-def _filter_df_numeric(df, filters):
-    """
-    Filters are applied to numeric columns.
-    Expected filter keys:
-    - Productivity
-    - Reject Ratio
-    - Rework Ratio
-    """
-    if not filters or df is None or df.empty:
+# ---------- Shared dashboard processing ----------
+def apply_report_postprocessing(df, report_category, filters=None, sort=None):
+    if df is None or df.empty:
         return df
 
-    filter_column_map = {
-        "Productivity": "_ProductivityNum",
-        "Reject Ratio": "_RejectRatioNum",
-        "Rework Ratio": "_ReworkRatioNum",
-    }
-
-    conditions = []
-    for field, cond in filters.items():
-        if field not in filter_column_map:
-            continue
-
-        col = filter_column_map[field]
-        if cond.lt is not None:
-            conditions.append(df[col] <= cond.lt)
-        if cond.gt is not None:
-            conditions.append(df[col] >= cond.gt)
-
-    if conditions:
-        mask = pd.concat(conditions, axis=1).all(axis=1)
-        df = df[mask]
-
+    df = merge_consecutive_downtime(df, report_category)
+    df = fu.apply_filters(df, filters)
+    df = _apply_sort(df, report_category, sort)
     return df
 
 
+def build_dashboard_preview_response(df, pagination=None):
+    if df is None or df.empty:
+        return {
+            "rows": [],
+            "total": 0,
+        }
+
+    total = len(df)
+    page_df = _apply_pagination(df, pagination)
+
+    return {
+        "rows": page_df.to_dict(orient="records"),
+        "total": total,
+    }
+
+# ---------- Shared filters/sort/pagination ----------
 def _apply_sort(df, report_category, sort):
     if df is None or df.empty:
         return df
 
     primary_sort = "Operator" if report_category == ReportCategory.OPERATOR else "MC"
 
-    if sort:
-        sort_by = sort.sort_by
+    if sort and sort.sort_by:
+        sort_by = fu.PUBLIC_TO_INTERNAL_FILTER_COLUMNS.get(sort.sort_by, sort.sort_by)
 
-        if sort_by in ["Productivity", "Reject Ratio", "Rework Ratio"]:
-            sort_by = {
-                "Productivity": "_ProductivityNum",
-                "Reject Ratio": "_RejectRatioNum",
-                "Rework Ratio": "_ReworkRatioNum",
-            }[sort_by]
+        if sort_by in df.columns:
+            ascending = (sort.direction == "ascending")
+            return df.sort_values(by=[sort_by], ascending=ascending).reset_index(drop=True)
 
-        return df.sort_values(by=[sort_by], ascending=(sort.direction == "ascending")).reset_index(drop=True)
+    fallback_cols = [c for c in [primary_sort, "_StartTs"] if c in df.columns]
+    if fallback_cols:
+        return df.sort_values(by=fallback_cols).reset_index(drop=True)
 
-    return df.sort_values(by=[primary_sort, "_StartTs"]).reset_index(drop=True)
+    return df.reset_index(drop=True)
 
 
 def _apply_pagination(df, pagination):
@@ -200,13 +190,7 @@ def _apply_pagination(df, pagination):
 def get_report_legacy(session, report_category, time_from, time_to, filters, sort, pagination):
     df = query_activity_mesin_legacy(session, time_from, time_to)
     df = transform_legacy_report_df(df, report_category)
-
-    df = merge_consecutive_downtime(df, report_category)
-    df = _filter_df_numeric(df, filters)
-    df = _apply_sort(df, report_category, sort)
-    df = _apply_pagination(df, pagination)
-
-    df = ru.finalize_metric_strings(df)
+    df = apply_report_postprocessing(df, report_category, filters, sort)
     return df
 
 
@@ -353,13 +337,7 @@ def get_report_from_fact_table(session, report_category, time_from, time_to, fil
         df = df[df["Desc"] != "NP : No Plan"].copy()
 
     df = ru.normalize_report_df(df)
-
-    df = merge_consecutive_downtime(df, report_category)
-    df = _filter_df_numeric(df, filters)
-    df = _apply_sort(df, report_category, sort)
-    df = _apply_pagination(df, pagination)
-
-    df = ru.finalize_metric_strings(df)
+    df = apply_report_postprocessing(df, report_category, filters, sort)
     return df
 
 # ---------- Lazy fact backfill helpers ----------
@@ -540,6 +518,10 @@ def build_output_frames(df, report_category, format, date_from, shift_from, date
 
     # ----- IMN output -----
     df_imn = df.copy(deep=True)
+
+    # Fill display metric strings before selecting final columns
+    df_imn = ru.finalize_metric_strings(df_imn)
+
     imn_header = [
         sort_by_first, "Shift", "Tanggal", "StartTime", "StopTime", sort_by_next,
         "Kode Tooling", "Common Tooling Name", "Part No", "Part Name", "Qty", "Target",

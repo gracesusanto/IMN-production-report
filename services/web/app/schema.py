@@ -1,9 +1,9 @@
 from enum import Enum
-from typing import Union, Optional, Dict
+from typing import Union, Optional, Dict, List, Any
 from datetime import date
 import re
 
-from pydantic import BaseModel, constr, validator
+from pydantic import BaseModel, constr, validator, Field
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 
 import app.model.models as models
@@ -132,6 +132,37 @@ class SortConfig(BaseModel):
 class Pagination(BaseModel):
     page: Optional[int] = 1
     page_size: Optional[int] = 10
+
+
+ScalarFilterValue = Union[str, int, float, bool]
+
+class FieldFilter(BaseModel):
+    type: Optional[str] = None  # "string" | "number" | "date" | "boolean"
+
+    equals: Optional[ScalarFilterValue] = None
+    not_equals: Optional[ScalarFilterValue] = None
+
+    contains: Optional[str] = None
+    not_contains: Optional[str] = None
+    starts_with: Optional[str] = None
+    ends_with: Optional[str] = None
+
+    gt: Optional[float] = None
+    gte: Optional[float] = None
+    lt: Optional[float] = None
+    lte: Optional[float] = None
+
+    before: Optional[str] = None
+    after: Optional[str] = None
+    on_or_before: Optional[str] = None
+    on_or_after: Optional[str] = None
+
+    between: Optional[List[ScalarFilterValue]] = None
+    in_list: Optional[List[ScalarFilterValue]] = Field(default=None, alias="in")
+    not_in: Optional[List[ScalarFilterValue]] = None
+
+    is_empty: Optional[bool] = None
+    is_not_empty: Optional[bool] = None
 
 
 class ReportRequest(BaseModel):
