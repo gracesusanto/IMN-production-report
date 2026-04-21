@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Union, Optional, Dict, List, Any
-from datetime import date
+from datetime import date, datetime
 import re
 
 from pydantic import BaseModel, constr, validator, Field
@@ -103,8 +103,8 @@ class FormatType(str, Enum):
 
 
 class Activity(BaseModel):
-    tooling_id: str
-    mesin_id: str
+    tooling_id: Union[str, None]
+    mesin_id: Union[str, None]
     operator_id: str
     curr_category: Union[str, None]
     next_category: str
@@ -115,11 +115,7 @@ class Activity(BaseModel):
     lot_no: Union[str, None] = None
     pack_no: Union[str, None] = None
     keterangan: Union[str, None] = None
-
-
-class FieldFilter(BaseModel):
-    lt: Optional[float] = None
-    gt: Optional[float] = None
+    event_timestamp: Optional[datetime] = None
 
 
 class SortConfig(BaseModel):
@@ -167,6 +163,34 @@ class FieldFilter(BaseModel):
 
 class ReportRequest(BaseModel):
     format: FormatType
+    date_from: Union[date, None] = None
+    shift_from: Union[int, None] = 1
+    date_to: Union[date, None] = None
+    shift_to: Union[int, None] = 3
+    pagination: Union[Pagination, None] = None
+    filters: Optional[Dict[str, FieldFilter]] = None
+    sort: Optional[SortConfig] = None
+
+
+class ReportType(str, Enum):
+    MESIN = "mesin"
+    OPERATOR = "operator"
+
+
+class DashboardReportRequest(BaseModel):
+    """Clean dashboard request without required format field"""
+    date_from: Union[date, None] = None
+    shift_from: Union[int, None] = 1
+    date_to: Union[date, None] = None
+    shift_to: Union[int, None] = 3
+    pagination: Union[Pagination, None] = None
+    filters: Optional[Dict[str, FieldFilter]] = None
+    sort: Optional[SortConfig] = None
+
+
+class DashboardDetailRequest(BaseModel):
+    """Detail report request with explicit report_type"""
+    report_type: ReportType
     date_from: Union[date, None] = None
     shift_from: Union[int, None] = 1
     date_to: Union[date, None] = None

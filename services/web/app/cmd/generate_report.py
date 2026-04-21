@@ -14,6 +14,7 @@ import app.schema as schema
 import app.service.utils as ru
 import app.service.filter_utils as fu
 import app.service.report as report
+import app.service.report_summary as rs
 import app.cmd.backfill_report_facts as backfill_report_facts
 
 # ---------- Feature flag ----------
@@ -209,6 +210,7 @@ def query_activity_mesin_legacy(session, time_from, time_to):
             models.Tooling.common_tooling_name.label("Common Tooling Name"),
             models.Tooling.part_no.label("Part No"),
             models.Tooling.part_name.label("Part Name"),
+            models.Tooling.proses.label("Proses"),
             models.Tooling.std_jam.label("Target"),
             activity_start.timestamp.label("_StartTs"),
             activity_stop.timestamp.label("_StopTs"),
@@ -239,7 +241,7 @@ def query_activity_mesin_legacy(session, time_from, time_to):
         return pd.DataFrame(
             columns=[
                 "MC", "Operator", "NIK", "Tooling", "Kode Tooling", "Common Tooling Name",
-                "Part No", "Part Name", "Target", "_StartTs", "_StopTs", "Desc",
+                "Part No", "Part Name", "Proses", "Target", "_StartTs", "_StopTs", "Desc",
                 "Qty", "Reject", "Rework", "Keterangan", "Keterangan Limax",
             ]
         )
@@ -275,7 +277,10 @@ def transform_legacy_report_df(df, report_category):
     if report_category == ReportCategory.OPERATOR:
         df = df[df["Desc"] != "NP : No Plan"].copy()
 
-    columns_to_replace = ["MC", "Tooling", "Kode Tooling", "Common Tooling Name", "Part No", "Part Name"]
+    columns_to_replace = [
+        "MC", "Tooling", "Kode Tooling", "Common Tooling Name",
+        "Part No", "Part Name", "Proses",
+    ]
     df.loc[:, columns_to_replace] = df.loc[:, columns_to_replace].replace([0, None, np.nan], "-")
 
     if report_category == ReportCategory.MESIN:
@@ -286,6 +291,189 @@ def transform_legacy_report_df(df, report_category):
     df = ru.add_numeric_metrics(df)
 
     return df
+
+
+# ---------- Raw data helpers for dashboard summary ----------
+def get_report_legacy_raw(session, report_category, time_from, time_to):
+    """Get raw normalized report data without postprocessing for dashboard summary."""
+    df = query_activity_mesin_legacy(session, time_from, time_to)
+    df = transform_legacy_report_df(df, report_category)
+    # Return normalized data WITHOUT apply_report_postprocessing
+    return df
+
+
+def get_report_from_fact_table_raw(session, report_category, time_from, time_to):
+    """
+    Get raw fact table data with overlap-based filtering for dashboard summary.
+    Uses overlap logic: start_ts < window_end AND stop_ts > window_start
+    """
+    query = (
+        session.query(models.ReportActivityFact)
+        .filter(models.ReportActivityFact.start_ts_utc < time_to)
+        .filter(models.ReportActivityFact.stop_ts_utc > time_from)
+        .order_by(models.ReportActivityFact.start_ts_utc.asc())
+    )
+
+    if report_category == ReportCategory.MESIN:
+        query = query.filter(models.ReportActivityFact.mesin_id.isnot(None))
+
+    rows = query.all()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(
+        [
+            {
+                "ActivityMesinId": r.activity_mesin_id,
+                "MC": r.mc_name if r.mc_name else "-",
+                "Operator": r.operator_name if r.operator_name else "-",
+                "NIK": r.operator_nik if r.operator_nik else "-",
+                "Tooling": r.tooling_id if r.tooling_id else "-",
+                "Kode Tooling": r.kode_tooling if r.kode_tooling else "-",
+                "Common Tooling Name": r.common_tooling_name if r.common_tooling_name else "-",
+                "Part No": r.part_no if r.part_no else "-",
+                "Part Name": r.part_name if r.part_name else "-",
+                "Proses": getattr(r, "proses", None) or "-",
+                "Target": r.target_std_jam if r.target_std_jam else 0,
+                "_StartTs": r.start_ts_utc,
+                "_StopTs": r.stop_ts_utc,
+                "Desc": r.category_full,
+                "Qty": int(r.qty or 0),
+                "Reject": int(r.reject or 0),
+                "Rework": int(r.rework or 0),
+                "Keterangan": r.keterangan_final or "",
+                "Keterangan Limax": ru.build_keterangan_limax(int(r.reject or 0), int(r.rework or 0), r.keterangan_final or ""),
+                "_ProductivityNum": float(r.productivity_pct or 0),
+                "_RejectRatioNum": float(r.reject_ratio_pct or 0),
+                "_ReworkRatioNum": float(r.rework_ratio_pct or 0),
+            }
+            for r in rows
+        ]
+    )
+
+    if report_category == ReportCategory.OPERATOR:
+        df = df[df["Desc"] != "NP : No Plan"].copy()
+
+    # Return normalized data WITHOUT apply_report_postprocessing
+    return ru.normalize_report_df(df)
+
+
+def get_report_with_overlap_window(session, report_category, time_from, time_to):
+    """
+    Get raw report data using overlap-based time filtering for dashboard summary.
+    Filters by: start < time_to AND stop > time_from
+    """
+    use_new = USE_REPORT_FACT_TABLE
+
+    if use_new:
+        # Use overlap filtering for fact table
+        query = (
+            session.query(models.ReportActivityFact)
+            .filter(models.ReportActivityFact.start_ts_utc < time_to)
+            .filter(models.ReportActivityFact.stop_ts_utc > time_from)
+            .order_by(models.ReportActivityFact.start_ts_utc.asc())
+        )
+
+        if report_category == ReportCategory.MESIN:
+            query = query.filter(models.ReportActivityFact.mesin_id.isnot(None))
+
+        rows = query.all()
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(
+            [
+                {
+                    "ActivityMesinId": r.activity_mesin_id,
+                    "MC": r.mc_name if r.mc_name else "-",
+                    "Operator": r.operator_name if r.operator_name else "-",
+                    "NIK": r.operator_nik if r.operator_nik else "-",
+                    "Tooling": r.tooling_id if r.tooling_id else "-",
+                    "Kode Tooling": r.kode_tooling if r.kode_tooling else "-",
+                    "Common Tooling Name": r.common_tooling_name if r.common_tooling_name else "-",
+                    "Part No": r.part_no if r.part_no else "-",
+                    "Part Name": r.part_name if r.part_name else "-",
+                    "Proses": getattr(r, "proses", None) or "-",
+                    "Target": r.target_std_jam if r.target_std_jam else 0,
+                    "_StartTs": r.start_ts_utc,
+                    "_StopTs": r.stop_ts_utc,
+                    "Desc": r.category_full,
+                    "Qty": int(r.qty or 0),
+                    "Reject": int(r.reject or 0),
+                    "Rework": int(r.rework or 0),
+                    "Keterangan": r.keterangan_final or "",
+                }
+                for r in rows
+            ]
+        )
+    else:
+        # For legacy path, use overlap filtering on ActivityMesin
+        activity_start = aliased(models.MesinLog)
+        activity_stop = aliased(models.MesinLog)
+
+        query = (
+            session.query(
+                models.ActivityMesin.id.label("ActivityMesinId"),
+                models.Mesin.name.label("MC"),
+                models.Operator.name.label("Operator"),
+                models.Operator.nik.label("NIK"),
+                models.Tooling.id.label("Tooling"),
+                models.Tooling.kode_tooling.label("Kode Tooling"),
+                models.Tooling.common_tooling_name.label("Common Tooling Name"),
+                models.Tooling.part_no.label("Part No"),
+                models.Tooling.part_name.label("Part Name"),
+                models.Tooling.proses.label("Proses"),
+                models.Tooling.std_jam.label("Target"),
+                activity_start.timestamp.label("_StartTs"),
+                activity_stop.timestamp.label("_StopTs"),
+                models.ActivityMesin.category.label("Desc"),
+                models.ActivityMesin.output.label("Qty"),
+                models.ActivityMesin.reject.label("Reject"),
+                models.ActivityMesin.rework.label("Rework"),
+                models.ActivityMesin.coil_no.label("Coil No"),
+                models.ActivityMesin.lot_no.label("Lot No"),
+                models.ActivityMesin.pack_no.label("Pack No"),
+                models.ActivityMesin.keterangan.label("KeteranganRaw"),
+            )
+            .outerjoin(models.Mesin, models.ActivityMesin.mesin_id == models.Mesin.id)
+            .join(activity_start, models.ActivityMesin.start_time)
+            .outerjoin(activity_stop, models.ActivityMesin.stop_time)
+            .join(models.Operator, models.Operator.id == activity_start.operator_id)
+            .outerjoin(models.Tooling, models.Tooling.id == activity_start.tooling_id)
+            # Overlap filtering: start < time_to AND stop > time_from
+            .filter(activity_start.timestamp < time_to)
+            .filter(activity_stop.timestamp > time_from)
+            .filter(models.ActivityMesin.stop_time_id.isnot(None))
+            .order_by(models.Mesin.name.asc(), activity_start.timestamp.asc())
+        )
+
+        result = session.execute(query)
+        df = pd.DataFrame(result.fetchall(), columns=result.keys())
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # Process keterangan fields
+        for col in ["Coil No", "Lot No", "Pack No", "KeteranganRaw"]:
+            df[col] = df[col].fillna("").replace("-", "")
+
+        df["Keterangan"] = df.apply(
+            lambda row: ru.combine_keterangan_final(
+                row["KeteranganRaw"],
+                row["Coil No"],
+                row["Lot No"],
+                row["Pack No"],
+            ),
+            axis=1,
+        )
+
+        df.drop(columns=["Coil No", "Lot No", "Pack No", "KeteranganRaw"], inplace=True)
+        df = transform_legacy_report_df(df, report_category)
+
+    if report_category == ReportCategory.OPERATOR:
+        df = df[df["Desc"] != "NP : No Plan"].copy()
+
+    return ru.normalize_report_df(df)
 
 
 # ---------- New path (ReportActivityFact) ----------
@@ -316,6 +504,7 @@ def get_report_from_fact_table(session, report_category, time_from, time_to, fil
                 "Common Tooling Name": r.common_tooling_name if r.common_tooling_name else "-",
                 "Part No": r.part_no if r.part_no else "-",
                 "Part Name": r.part_name if r.part_name else "-",
+                "Proses": getattr(r, "proses", None) or "-",
                 "Target": r.target_std_jam if r.target_std_jam else 0,
                 "_StartTs": r.start_ts_utc,
                 "_StopTs": r.stop_ts_utc,
@@ -524,7 +713,7 @@ def build_output_frames(df, report_category, format, date_from, shift_from, date
 
     imn_header = [
         sort_by_first, "Shift", "Tanggal", "StartTime", "StopTime", sort_by_next,
-        "Kode Tooling", "Common Tooling Name", "Part No", "Part Name", "Qty", "Target",
+        "Kode Tooling", "Common Tooling Name", "Part No", "Part Name", "Proses", "Qty", "Target",
         "Reject", "Rework", "Desc", "Duration", "Productivity", "Reject Ratio", "Rework Ratio", "Keterangan",
     ]
 
@@ -533,7 +722,7 @@ def build_output_frames(df, report_category, format, date_from, shift_from, date
             df_imn[col] = "" if col in [
                 "Desc", "Keterangan", "Duration", "Productivity", "Reject Ratio", "Rework Ratio",
                 "Tanggal", "StartTime", "StopTime", "Kode Tooling", "Common Tooling Name",
-                "Part No", "Part Name"
+                "Part No", "Part Name", "Proses"
             ] else 0
     df_imn = df_imn[imn_header]
 
@@ -576,6 +765,95 @@ def build_output_frames(df, report_category, format, date_from, shift_from, date
         filename = _get_csv_filename(report_category.value, date_from, shift_from, date_to, shift_to)
 
     return (df_limax, filename) if "limax" in format.value else (df_imn, filename)
+
+
+# ---------- Dashboard summary ----------
+def get_dashboard_summary_report(
+    report_category: ReportCategory,
+    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None,
+    pagination=None, filters=None, sort=None,
+):
+    """
+    Get dashboard summary report with shift splitting and business grain aggregation.
+    Uses raw atomic rows with overlap-based time filtering.
+    This is for dashboard views only - exports should use get_report().
+    """
+    date_from, shift_from, date_to, shift_to = _fill_default_datetime(date_time_from, shift_from, date_time_to, shift_to)
+    time_from, time_to = _calculate_datetime_range(date_from, shift_from, date_to, shift_to)
+
+    with SessionLocal() as session:
+        # Get raw data using overlap-based time filtering
+        # This ensures we capture activities that span the time window boundaries
+        df = get_report_with_overlap_window(
+            session=session,
+            report_category=report_category,
+            time_from=time_from,
+            time_to=time_to,
+        )
+
+    # Apply dashboard summary aggregation to raw atomic rows
+    summary_df = rs.summarize_dashboard_df(df, report_category)
+
+    # Apply filters, sort, and pagination to summarized data
+    summary_df = fu.apply_filters(summary_df, filters)
+    summary_df = _apply_sort(summary_df, report_category, sort)
+
+    return rs.build_dashboard_response(df, report_category, pagination)
+
+
+def get_detail_export_report(
+    report_category: ReportCategory,
+    date_time_from=None, shift_from=None, date_time_to=None, shift_to=None,
+    pagination=None, filters=None, sort=None,
+):
+    """
+    Get detail/export report matching Excel column structure exactly.
+    This preserves the familiar business format.
+    """
+    date_from, shift_from, date_to, shift_to = _fill_default_datetime(date_time_from, shift_from, date_time_to, shift_to)
+    time_from, time_to = _calculate_datetime_range(date_from, shift_from, date_to, shift_to)
+
+    with SessionLocal() as session:
+        # Get raw data using overlap-based time filtering for complete data
+        df = get_report_with_overlap_window(
+            session=session,
+            report_category=report_category,
+            time_from=time_from,
+            time_to=time_to,
+        )
+
+    # Apply dashboard summary for consistent KPIs, then convert to detail format
+    DEBUG_REPORT_FLOW = False  # Feature flag for debug output
+
+    if DEBUG_REPORT_FLOW:
+        print(f"\n=== DEBUG: get_detail_export_report - Raw Data ===")
+        print(f"Raw df shape: {df.shape}")
+        if not df.empty:
+            print("Raw df columns:", list(df.columns))
+            print("Sample raw rows:")
+            available_cols = [col for col in ['MC', 'Desc', 'Target', 'Qty', 'Reject', '_DurationMinutes'] if col in df.columns]
+            if available_cols:
+                print(df[available_cols].head(3).to_string())
+            print(f"Desc values: {df['Desc'].unique().tolist() if 'Desc' in df.columns else 'No Desc column'}")
+
+    summary_df = rs.summarize_dashboard_df(df, report_category)
+
+    if DEBUG_REPORT_FLOW:
+        print(f"\nSummary df shape: {summary_df.shape}")
+        if not summary_df.empty:
+            print("Summary df columns:", list(summary_df.columns))
+            key_cols = ['MC', 'Plan Minutes', 'Utility Minutes', 'RT_Minutes', 'TP_Minutes', 'Target', 'Target Qty']
+            available_cols = [col for col in key_cols if col in summary_df.columns]
+            if available_cols:
+                print("Sample summary data:")
+                print(summary_df[available_cols].head(2).to_string())
+        print("=== END DEBUG ===\n")
+
+    # Apply filters and sort to summarized data
+    filtered_df = fu.apply_filters(summary_df, filters)
+    sorted_df = _apply_sort(filtered_df, report_category, sort)
+
+    return rs.build_detail_export_response(sorted_df, report_category, pagination)
 
 
 # ---------- Main entrypoint ----------

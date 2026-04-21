@@ -10,7 +10,7 @@ from fastapi_sqlalchemy import DBSessionMiddleware
 from fastapi.responses import StreamingResponse
 
 from sqlalchemy.orm import aliased
-from sqlalchemy import case, func, desc
+from sqlalchemy import case, func, desc, text
 
 import app.service.business_logic as business_logic
 import app.model.models as models
@@ -18,6 +18,7 @@ import app.schema as schema
 from app.database import Sessioner
 import app.cmd.generate_report as generate_report
 import app.cmd.db_ingestion as db_ingestion
+from app.cmd.realistic_seed_data import seed_master_data, seed_mock_activity
 import app.cmd.backup_csv.backup as backup
 import app.cmd.get_id as get_id
 import app.cmd.mock_data as mock_data
@@ -250,9 +251,62 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
         "machines_by_operator": [],
     }
 
-# ----- REPORT APIs ----- #
+# ----- DASHBOARD APIs ----- #
+@app.post("/api/reports/dashboard/machine-summary")
+def get_machine_dashboard_summary(request: schema.DashboardReportRequest):
+    """Machine Summary Dashboard - aggregated by tanggal + shift + mc + part + proses"""
+    return generate_report.get_dashboard_summary_report(
+        report_category=generate_report.ReportCategory.MESIN,
+        date_time_from=request.date_from,
+        shift_from=request.shift_from,
+        date_time_to=request.date_to,
+        shift_to=request.shift_to,
+        pagination=request.pagination,
+        filters=request.filters,
+        sort=request.sort,
+    )
+
+
+@app.post("/api/reports/dashboard/operator-summary")
+def get_operator_dashboard_summary(request: schema.DashboardReportRequest):
+    """Operator Summary Dashboard - aggregated by tanggal + shift + operator + mc + part + proses"""
+    return generate_report.get_dashboard_summary_report(
+        report_category=generate_report.ReportCategory.OPERATOR,
+        date_time_from=request.date_from,
+        shift_from=request.shift_from,
+        date_time_to=request.date_to,
+        shift_to=request.shift_to,
+        pagination=request.pagination,
+        filters=request.filters,
+        sort=request.sort,
+    )
+
+
+@app.post("/api/reports/dashboard/detail")
+def get_dashboard_detail(request: schema.DashboardDetailRequest):
+    """Detail/Export Dashboard - Excel-like format with exact business column order"""
+    report_category = (
+        generate_report.ReportCategory.MESIN
+        if request.report_type == schema.ReportType.MESIN
+        else generate_report.ReportCategory.OPERATOR
+    )
+
+    return generate_report.get_detail_export_report(
+        report_category=report_category,
+        date_time_from=request.date_from,
+        shift_from=request.shift_from,
+        date_time_to=request.date_to,
+        shift_to=request.shift_to,
+        pagination=request.pagination,
+        filters=request.filters,
+        sort=request.sort,
+    )
+
+
+# ----- LEGACY REPORT APIs (for backward compatibility) ----- #
 @app.post("/report/mesin")
 def get_report(request: schema.ReportRequest):
+    """Legacy mesin report endpoint - unchanged behavior for backward compatibility"""
     df, filename = generate_report.get_mesin_report(
         format=request.format,
         date_time_from=request.date_from,
@@ -264,19 +318,11 @@ def get_report(request: schema.ReportRequest):
         sort=request.sort,
     )
 
-    if request.format in {
-        schema.FormatType.IMN_DASHBOARD,
-        schema.FormatType.LIMAX_DASHBOARD,
-    }:
-        return generate_report.build_dashboard_preview_response(
-            df,
-            pagination=request.pagination,
-        )
-
     return business_logic.generate_report_response(df, filename, request.format)
 
 @app.post("/report/operator")
 def get_report(request: schema.ReportRequest):
+    """Legacy operator report endpoint - unchanged behavior for backward compatibility"""
     df, filename = generate_report.get_operator_report(
         format=request.format,
         date_time_from=request.date_from,
@@ -288,16 +334,45 @@ def get_report(request: schema.ReportRequest):
         sort=request.sort,
     )
 
-    if request.format in {
-        schema.FormatType.IMN_DASHBOARD,
-        schema.FormatType.LIMAX_DASHBOARD,
-    }:
-        return generate_report.build_dashboard_preview_response(
-            df,
-            pagination=request.pagination,
-        )
-
     return business_logic.generate_report_response(df, filename, request.format)
+
+# ----- ADMIN/MIGRATION APIs ----- #
+@app.get("/admin/test-connection")
+def test_connection():
+    """Test database connection"""
+    try:
+        session = Sessioner()
+        count = session.query(models.ReportActivityFact).count()
+        session.close()
+        return {"message": f"Connection OK, found {count} records"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/admin/backfill-proses")
+def backfill_proses_field(session=Sessioner):
+    """Manual backfill for proses field"""
+    try:
+        # Check what needs updating
+        facts_needing_update = session.query(models.ReportActivityFact).filter(
+            models.ReportActivityFact.proses.is_(None),
+            models.ReportActivityFact.tooling_id.isnot(None)
+        ).limit(5).all()  # Limit to first 5 for safety
+
+        if not facts_needing_update:
+            return {"message": "No records to update"}
+
+        updated_count = 0
+        for fact in facts_needing_update:
+            tooling = session.query(models.Tooling).get(fact.tooling_id)
+            if tooling and tooling.proses:
+                fact.proses = tooling.proses
+                updated_count += 1
+
+        session.commit()
+        return {"updated_count": updated_count, "message": "Success"}
+    except Exception as e:
+        session.rollback()
+        return {"error": str(e)}
 
 # ----- MODEL DATA CSV EXPORT API ----- #
 @app.get("/export/csv")
@@ -398,7 +473,9 @@ def get_mesin_status(session=Sessioner):
             models.ActivityMesin.category.label("Status"),
         )
         .join(start_log_alias, models.ActivityMesin.start_time_id == start_log_alias.id)
-        .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active machines
+        .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
+        .filter(models.ActivityMesin.mesin_id.isnot(None))     # Must have a machine
+        .filter(models.ActivityMesin.mesin_id != "")           # Must not be empty string
         .filter(~models.ActivityMesin.category.startswith("NP"))  # Exclude "No Plan"
         .order_by(desc(start_log_alias.timestamp))  # Latest active activities first
         .all()
@@ -652,6 +729,40 @@ def report_backfill(request: schema.ReportBackfillRequest, session=Sessioner):
         "batch_size": request.batch_size,
         "total_backfilled": total,
     }
+
+
+# ----- DEV-ONLY ENDPOINTS ----- #
+@app.post("/dev/mock/seed-report-scenario")
+def dev_seed_report_scenario(session=Sessioner):
+    """
+    Dev-only endpoint to seed realistic report data for testing.
+    Creates comprehensive scenario with proper timing and KPI data.
+    """
+    # Environment guard - only allow in dev/local environments
+    # if os.getenv("APP_ENV", "dev") not in {"dev", "local"}:
+    #     raise HTTPException(status_code=403, detail="Dev seed endpoint disabled in production")
+
+    try:
+        # Clear existing activity data
+        session.execute("DELETE FROM activity_mesin")
+        session.commit()
+
+        # Ensure master data exists
+        seed_master_data(session)
+
+        # Create realistic activity scenario
+        result = seed_mock_activity(session)
+
+        return {
+            "status": "success",
+            "message": "Realistic report scenario seeded successfully",
+            "data": result
+        }
+
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to seed data: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

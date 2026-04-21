@@ -77,6 +77,7 @@ def upsert_report_facts_for_stopped_activities(stopped_activities: list[models.A
             common_tooling_name=(tl.common_tooling_name if tl else None),
             part_no=(tl.part_no if tl else None),
             part_name=(tl.part_name if tl else None),
+            proses=(tl.proses if tl else None),
             target_std_jam=target_std_jam,
 
             tanggal_local=tanggal_local,

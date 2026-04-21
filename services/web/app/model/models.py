@@ -193,6 +193,7 @@ class ReportActivityFact(Base):
     common_tooling_name = sa.Column(sa.String, nullable=True)
     part_no = sa.Column(sa.String, nullable=True)
     part_name = sa.Column(sa.String, nullable=True)
+    proses = sa.Column(sa.String, nullable=True)
     target_std_jam = sa.Column(sa.Integer, nullable=True)
 
     # Derived for fast summary/group/filter

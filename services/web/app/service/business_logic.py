@@ -103,6 +103,10 @@ def process_activity(activity, session):
         curr_category=curr_category,
         next_category=next_category,
     )
+
+    # Use event_timestamp if provided for seed data
+    if hasattr(activity, 'event_timestamp') and activity.event_timestamp:
+        new_log.timestamp = activity.event_timestamp
     session.add(new_log)
     session.flush()  # get new_log.id without committing yet
 
@@ -561,7 +565,11 @@ def generate_single_barcode(model_type, record_id, session):
 
 def generate_report_response(df, filename, report_format):
     if "dashboard" in report_format.value:
-        return JSONResponse(content=df.to_dict(orient="records"))
+        rows = df.to_dict(orient="records")
+        return JSONResponse(content={
+            "rows": rows,
+            "total": len(rows)
+        })
     else:
         if report_format == schema.FormatType.LIMAX:
             # Prepare CSV

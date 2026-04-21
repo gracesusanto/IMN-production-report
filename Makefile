@@ -46,3 +46,10 @@ restart: stop start
 
 # Restart only development containers
 dev-restart: stop dev-start
+
+# Run tests in development environment
+dev-test:
+	docker exec api_dev bash -c "cd /app && python -m pytest -v"
+
+# Run tests (alias for dev-test)
+test: dev-test
