@@ -930,8 +930,10 @@ def _apply_date_shift_filter(df, date_from, date_to, shift_from, shift_to):
 
         # Shift filtering
         if 'Shift' in df.columns:
-            shift_mask = (df['Shift'].astype(int) >= shift_from) & \
-                        (df['Shift'].astype(int) <= shift_to)
+            shift_from_int = int(shift_from)
+            shift_to_int = int(shift_to)
+            shift_mask = (df['Shift'].astype(int) >= shift_from_int) & \
+                        (df['Shift'].astype(int) <= shift_to_int)
             df = df[shift_mask]
 
         if original_count != len(df):
@@ -968,8 +970,10 @@ def _assert_date_shift_constraints(df, date_from, date_to, shift_from, shift_to)
                     print(f"  Row has tanggal={row.get('Tanggal')}, expected {date_from} <= tanggal <= {date_to}")
 
         if 'Shift' in df.columns:
+            shift_from_int = int(shift_from)
+            shift_to_int = int(shift_to)
             df_shifts = df['Shift'].astype(int)
-            shift_violations = df[(df_shifts < shift_from) | (df_shifts > shift_to)]
+            shift_violations = df[(df_shifts < shift_from_int) | (df_shifts > shift_to_int)]
             if not shift_violations.empty:
                 violations.append(f"Shift violations: {len(shift_violations)} rows outside shift {shift_from} to {shift_to}")
                 print(f"DEBUG: Shift violations found:")
