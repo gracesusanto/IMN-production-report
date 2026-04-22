@@ -40,14 +40,14 @@ def create_fixed_activity_data(session):
     do(schema.Activity(
         operator_id=opA, mesin_id=mc1, tooling_id=tl1,
         curr_category=None,
-        next_category="RT : Runtime",  # ✅ Fixed: RT instead of U
+        next_category="U : Utility",  # ✅ Fixed: U instead of RT
         output=0, reject=0, rework=0,
         keterangan="A start runtime TL1"
     ))
 
     do(schema.Activity(
         operator_id=opA, mesin_id=mc1, tooling_id=tl1,
-        curr_category="RT : Runtime",
+        curr_category="U : Utility",
         next_category="TP : Tooling Problem",
         output=85, reject=3, rework=2,
         coil_no="A-C01", lot_no="A-L01", pack_no="A-P01",
@@ -57,14 +57,14 @@ def create_fixed_activity_data(session):
     do(schema.Activity(
         operator_id=opA, mesin_id=mc1, tooling_id=tl1,
         curr_category="TP : Tooling Problem",
-        next_category="RT : Runtime",
+        next_category="U : Utility",
         output=0, reject=0, rework=0,
         keterangan="A fixed tooling -> resume runtime"
     ))
 
     do(schema.Activity(
         operator_id=opA, mesin_id=mc1, tooling_id=tl1,
-        curr_category="RT : Runtime",
+        curr_category="U : Utility",
         next_category="BT : Breaktime",
         output=45, reject=1, rework=0,
         keterangan="A more production -> break"
@@ -74,14 +74,14 @@ def create_fixed_activity_data(session):
     do(schema.Activity(
         operator_id=opB, mesin_id=mc2, tooling_id=tl2,
         curr_category=None,
-        next_category="RT : Runtime",
+        next_category="U : Utility",
         output=0, reject=0, rework=0,
         keterangan="B start runtime"
     ))
 
     do(schema.Activity(
         operator_id=opB, mesin_id=mc2, tooling_id=tl2,
-        curr_category="RT : Runtime",
+        curr_category="U : Utility",
         next_category="TS : Tooling Setting",
         output=120, reject=5, rework=3,
         keterangan="B production -> tooling setup"
@@ -90,7 +90,7 @@ def create_fixed_activity_data(session):
     do(schema.Activity(
         operator_id=opB, mesin_id=mc2, tooling_id=tl2,
         curr_category="TS : Tooling Setting",
-        next_category="RT : Runtime",
+        next_category="U : Utility",
         output=0, reject=0, rework=0,
         keterangan="B setup complete -> resume"
     ))
@@ -99,14 +99,14 @@ def create_fixed_activity_data(session):
     do(schema.Activity(
         operator_id=opC, mesin_id=mc3, tooling_id=tl3,
         curr_category=None,
-        next_category="RT : Runtime",
+        next_category="U : Utility",
         output=0, reject=0, rework=0,
         keterangan="C start runtime"
     ))
 
     do(schema.Activity(
         operator_id=opC, mesin_id=mc3, tooling_id=tl3,
-        curr_category="RT : Runtime",
+        curr_category="U : Utility",
         next_category="BR : Briefing",
         output=60, reject=2, rework=1,
         keterangan="C production -> briefing"
@@ -123,7 +123,7 @@ def create_fixed_activity_data(session):
     do(schema.Activity(
         operator_id=opC, mesin_id="", tooling_id="",
         curr_category="NP : No Plan",
-        next_category="RT : Runtime",
+        next_category="U : Utility",
         output=0, reject=0, rework=0,
         keterangan="C plan available -> runtime"
     ))

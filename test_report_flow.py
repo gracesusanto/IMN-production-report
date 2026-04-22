@@ -114,7 +114,7 @@ def test_summarization_function():
             '_StartTs': datetime.now() - timedelta(hours=8),
             '_StopTs': datetime.now() - timedelta(hours=7),
             '_DurationMinutes': 60,
-            'Desc Code': 'RT'  # Runtime
+            'Desc Code': 'U'  # Runtime
         },
         {
             'Tanggal': '2024-01-15',
@@ -153,7 +153,7 @@ def test_summarization_function():
             first_row = summarized.iloc[0]
 
             # Check key calculated fields
-            key_fields = ['Plan', 'Utility', 'RT', 'TP', 'Plan Minutes', 'Utility Minutes',
+            key_fields = ['Plan', 'Utility', 'U', 'TP', 'Plan Minutes', 'Utility Minutes',
                          'OTR', 'PER', 'QR', 'OEE', 'Target Qty']
             for field in key_fields:
                 if field in first_row:

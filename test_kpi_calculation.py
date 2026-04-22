@@ -35,8 +35,8 @@ def _join_unique(series):
     return " | ".join(str(v) for v in unique_vals if str(v).strip())
 
 # Mock the constants
-CATEGORY_CODES = frozenset({"RT", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR"})
-PLAN_INCLUDED_CODES = frozenset({"RT", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR"})
+CATEGORY_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR"})
+PLAN_INCLUDED_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR"})
 
 def test_summarize_function():
     """Test the summarization logic with realistic mock data"""
@@ -61,7 +61,7 @@ def test_summarize_function():
             '_StartTs': datetime(2024, 1, 15, 7, 0, 0),
             '_StopTs': datetime(2024, 1, 15, 8, 0, 0),
             '_DurationMinutes': 60,
-            'Desc Code': 'RT'  # Runtime
+            'Desc Code': 'U'  # Runtime
         },
         # Tool change downtime
         {
@@ -99,7 +99,7 @@ def test_summarize_function():
             '_StartTs': datetime(2024, 1, 15, 8, 30, 0),
             '_StopTs': datetime(2024, 1, 15, 9, 0, 0),
             '_DurationMinutes': 30,
-            'Desc Code': 'RT'  # Runtime
+            'Desc Code': 'U'  # Runtime
         }
     ])
 
@@ -117,7 +117,7 @@ def test_summarize_function():
         )
 
     print("Time bucket columns added:")
-    time_cols = [f"{code}_Minutes" for code in ['RT', 'TP', 'TS']]
+    time_cols = [f"{code}_Minutes" for code in ['U', 'TP', 'TS']]
     print(mock_data[time_cols].to_string())
 
     # Step 2: Group by business grain
@@ -142,11 +142,11 @@ def test_summarize_function():
 
     print(f"\nGrouped data shape: {grouped.shape}")
     print("Grouped data:")
-    print(grouped[['MC', 'Qty', 'Reject', 'RT_Minutes', 'TP_Minutes', 'Target']].to_string())
+    print(grouped[['MC', 'Qty', 'Reject', 'U_Minutes', 'TP_Minutes', 'Target']].to_string())
 
     # Step 3: Calculate derived fields
     grouped["Total Output"] = grouped["Qty"] + grouped["Reject"] + grouped["Rework"]
-    grouped["Utility Minutes"] = grouped.get("RT_Minutes", 0.0)  # RT = Runtime/Utility
+    grouped["Utility Minutes"] = grouped.get("U_Minutes", 0.0)  # U = Runtime/Utility
     grouped["Plan Minutes"] = 0.0
 
     for code in PLAN_INCLUDED_CODES:
@@ -199,7 +199,7 @@ def test_summarize_function():
 
     print("\nFormatted display fields:")
     print(f"Plan: {grouped['Plan'].iloc[0]}")
-    print(f"Utility (RT): {grouped['Utility'].iloc[0]}")
+    print(f"Utility (U): {grouped['Utility'].iloc[0]}")
     print(f"TP: {grouped['TP'].iloc[0]}")
     print(f"Total Downtime: {grouped['Total Downtime'].iloc[0]}")
     print(f"OTR: {grouped['OTR'].iloc[0]}")

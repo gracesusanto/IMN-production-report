@@ -37,10 +37,10 @@ def test_split_rows_by_shift_preserves_totals(monkeypatch):
             {
                 "MC": "P1-A1",
                 "Operator": "A",
-                "Part No": "PART-1",
+                "Part No": "PAU-1",
                 "Part Name": "Part One",
                 "Proses": "6/6",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 # UTC 07:30 -> 08:30 = local 14:30 -> 15:30, crosses shift 1 -> 2
                 "_StartTs": _utc("2026-03-02 07:30:00"),
@@ -71,10 +71,10 @@ def test_machine_summary_merges_same_machine_part_proses_in_same_shift(monkeypat
             {
                 "MC": "P1-A1",
                 "Operator": "A",
-                "Part No": "PART-1",
+                "Part No": "PAU-1",
                 "Part Name": "Part One",
                 "Proses": "6/6",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 00:00:00"),  # local 07:00
                 "_StopTs": _utc("2026-03-02 01:00:00"),   # local 08:00
@@ -86,10 +86,10 @@ def test_machine_summary_merges_same_machine_part_proses_in_same_shift(monkeypat
             {
                 "MC": "P1-A1",
                 "Operator": "B",
-                "Part No": "PART-1",
+                "Part No": "PAU-1",
                 "Part Name": "Part One",
                 "Proses": "6/6",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 03:00:00"),  # local 10:00
                 "_StopTs": _utc("2026-03-02 04:00:00"),   # local 11:00
@@ -101,7 +101,7 @@ def test_machine_summary_merges_same_machine_part_proses_in_same_shift(monkeypat
             {
                 "MC": "P1-A1",
                 "Operator": "B",
-                "Part No": "PART-1",
+                "Part No": "PAU-1",
                 "Part Name": "Part One",
                 "Proses": "6/6",
                 "Desc": "TP : Tooling Problem",
@@ -122,7 +122,7 @@ def test_machine_summary_merges_same_machine_part_proses_in_same_shift(monkeypat
     row = summary.iloc[0]
 
     assert row["MC"] == "P1-A1"
-    assert row["Part No"] == "PART-1"
+    assert row["Part No"] == "PAU-1"
     assert row["Proses"] == "6/6"
     assert row["Qty"] == 210
     assert row["Reject"] == 5
@@ -140,10 +140,10 @@ def test_operator_summary_keeps_different_operators_separate(monkeypatch):
             {
                 "MC": "P1-A1",
                 "Operator": "A",
-                "Part No": "PART-1",
+                "Part No": "PAU-1",
                 "Part Name": "Part One",
                 "Proses": "6/6",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -155,10 +155,10 @@ def test_operator_summary_keeps_different_operators_separate(monkeypatch):
             {
                 "MC": "P1-A1",
                 "Operator": "B",
-                "Part No": "PART-1",
+                "Part No": "PAU-1",
                 "Part Name": "Part One",
                 "Proses": "6/6",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 01:00:00"),
                 "_StopTs": _utc("2026-03-02 02:00:00"),
@@ -186,10 +186,10 @@ def test_same_operator_same_machine_part_same_shift_merges(monkeypatch):
             {
                 "MC": "P1-A2",
                 "Operator": "A",
-                "Part No": "PART-2",
+                "Part No": "PAU-2",
                 "Part Name": "Part Two",
                 "Proses": "3/4",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 80,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 00:30:00"),
@@ -201,10 +201,10 @@ def test_same_operator_same_machine_part_same_shift_merges(monkeypatch):
             {
                 "MC": "P1-A2",
                 "Operator": "A",
-                "Part No": "PART-2",
+                "Part No": "PAU-2",
                 "Part Name": "Part Two",
                 "Proses": "3/4",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 80,
                 "_StartTs": _utc("2026-03-02 02:00:00"),
                 "_StopTs": _utc("2026-03-02 02:30:00"),
@@ -236,10 +236,10 @@ def test_cross_shift_split_allocates_qty_reject_rework_proportionally(monkeypatc
             {
                 "MC": "P1-B1",
                 "Operator": "C",
-                "Part No": "PART-3",
+                "Part No": "PAU-3",
                 "Part Name": "Part Three",
                 "Proses": "2/3",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 50,
                 # UTC 07:00 -> 09:00 = local 14:00 -> 16:00, crosses shift 1 -> 2 equally
                 "_StartTs": _utc("2026-03-02 07:00:00"),
@@ -278,10 +278,10 @@ def test_proses_included_in_grouping_when_present(monkeypatch):
             {
                 "MC": "P1-C1",
                 "Operator": "D",
-                "Part No": "PART-4",
+                "Part No": "PAU-4",
                 "Part Name": "Part Four",
                 "Proses": "1/2",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 60,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -293,10 +293,10 @@ def test_proses_included_in_grouping_when_present(monkeypatch):
             {
                 "MC": "P1-C1",
                 "Operator": "D",
-                "Part No": "PART-4",
+                "Part No": "PAU-4",
                 "Part Name": "Part Four",
                 "Proses": "2/2",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 60,
                 "_StartTs": _utc("2026-03-02 01:00:00"),
                 "_StopTs": _utc("2026-03-02 02:00:00"),
@@ -334,7 +334,7 @@ def test_multi_operator_one_machine_merges_in_machine_summary(monkeypatch):
                 "Part No": "P-100",
                 "Part Name": "Part 100",
                 "Proses": "1/1",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -349,7 +349,7 @@ def test_multi_operator_one_machine_merges_in_machine_summary(monkeypatch):
                 "Part No": "P-100",
                 "Part Name": "Part 100",
                 "Proses": "1/1",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 01:00:00"),
                 "_StopTs": _utc("2026-03-02 02:00:00"),
@@ -383,7 +383,7 @@ def test_multi_machine_one_operator_stays_separate_in_operator_summary(monkeypat
                 "Part No": "P-200",
                 "Part Name": "Part 200",
                 "Proses": "1/2",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 120,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -398,7 +398,7 @@ def test_multi_machine_one_operator_stays_separate_in_operator_summary(monkeypat
                 "Part No": "P-200",
                 "Part Name": "Part 200",
                 "Proses": "1/2",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 120,
                 "_StartTs": _utc("2026-03-02 01:00:00"),
                 "_StopTs": _utc("2026-03-02 02:00:00"),
@@ -435,9 +435,9 @@ def test_missing_proses_column_defaults_to_dash(monkeypatch):
             {
                 "MC": "P1-D1",
                 "Operator": "E",
-                "Part No": "PART-5",
+                "Part No": "PAU-5",
                 "Part Name": "Part Five",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 75,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -462,10 +462,10 @@ def test_build_dashboard_response_contains_numeric_and_display_fields(monkeypatc
             {
                 "MC": "P1-Z1",
                 "Operator": "F",
-                "Part No": "PART-9",
+                "Part No": "PAU-9",
                 "Part Name": "Part Nine",
                 "Proses": "1/1",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 100,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -506,10 +506,10 @@ def test_build_detail_export_response_from_summary_has_nonzero_time_and_kpis(mon
             {
                 "MC": "P1-X1",
                 "Operator": "G",
-                "Part No": "PART-10",
+                "Part No": "PAU-10",
                 "Part Name": "Part Ten",
                 "Proses": "2/2",
-                "Desc": "RT : Running Time",
+                "Desc": "U : Utility",
                 "Target": 120,
                 "_StartTs": _utc("2026-03-02 00:00:00"),
                 "_StopTs": _utc("2026-03-02 01:00:00"),
@@ -521,7 +521,7 @@ def test_build_detail_export_response_from_summary_has_nonzero_time_and_kpis(mon
             {
                 "MC": "P1-X1",
                 "Operator": "G",
-                "Part No": "PART-10",
+                "Part No": "PAU-10",
                 "Part Name": "Part Ten",
                 "Proses": "2/2",
                 "Desc": "TP : Tooling Problem",
@@ -595,7 +595,7 @@ def test_status_derivation_from_time_buckets():
 
 
 def test_category_code_extraction():
-    assert report_summary._category_code("RT : Running Time") == "RT"
+    assert report_summary._category_code("U : Utility") == "U"
     assert report_summary._category_code("TP : Tooling Problem") == "TP"
     assert report_summary._category_code("NP : No Plan") == "NP"
     assert report_summary._category_code("BT : Break Time") == "BT"

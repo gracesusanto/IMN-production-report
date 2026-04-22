@@ -29,10 +29,10 @@ class TestKpiCalculation(unittest.TestCase):
                 'Reject': 5,    # Reject count
                 'Rework': 2,    # Rework count
                 'Keterangan': 'Normal production',
-                '_StartTs': ru.JAKARTA_TZ.localize(datetime(2024, 1, 15, 7, 0, 0)),
-                '_StopTs': ru.JAKARTA_TZ.localize(datetime(2024, 1, 15, 8, 0, 0)),
+                '_StartTs': ru.JAKAUA_TZ.localize(datetime(2024, 1, 15, 7, 0, 0)),
+                '_StopTs': ru.JAKAUA_TZ.localize(datetime(2024, 1, 15, 8, 0, 0)),
                 '_DurationMinutes': 60,
-                'Desc': 'RT : Runtime'
+                'Desc': 'U : Utility'
             },
             # Tool change downtime
             {
@@ -48,8 +48,8 @@ class TestKpiCalculation(unittest.TestCase):
                 'Reject': 0,
                 'Rework': 0,
                 'Keterangan': 'Tool change required',
-                '_StartTs': ru.JAKARTA_TZ.localize(datetime(2024, 1, 15, 8, 0, 0)),
-                '_StopTs': ru.JAKARTA_TZ.localize(datetime(2024, 1, 15, 8, 30, 0)),
+                '_StartTs': ru.JAKAUA_TZ.localize(datetime(2024, 1, 15, 8, 0, 0)),
+                '_StopTs': ru.JAKAUA_TZ.localize(datetime(2024, 1, 15, 8, 30, 0)),
                 '_DurationMinutes': 30,
                 'Desc': 'TP : Tooling Problem'
             },
@@ -67,10 +67,10 @@ class TestKpiCalculation(unittest.TestCase):
                 'Reject': 2,
                 'Rework': 1,
                 'Keterangan': 'Resumed production',
-                '_StartTs': ru.JAKARTA_TZ.localize(datetime(2024, 1, 15, 8, 30, 0)),
-                '_StopTs': ru.JAKARTA_TZ.localize(datetime(2024, 1, 15, 9, 0, 0)),
+                '_StartTs': ru.JAKAUA_TZ.localize(datetime(2024, 1, 15, 8, 30, 0)),
+                '_StopTs': ru.JAKAUA_TZ.localize(datetime(2024, 1, 15, 9, 0, 0)),
                 '_DurationMinutes': 30,
-                'Desc': 'RT : Runtime'
+                'Desc': 'U : Utility'
             }
         ])
 
@@ -90,8 +90,8 @@ class TestKpiCalculation(unittest.TestCase):
         self.assertEqual(row['Target'], 100, "Target should be 100")
 
         # Test time calculations
-        self.assertEqual(row['Plan Minutes'], 120.0, "Plan should be RT+TP = 90+30 = 120 minutes")
-        self.assertEqual(row['Utility Minutes'], 90.0, "Utility should be RT = 60+30 = 90 minutes")
+        self.assertEqual(row['Plan Minutes'], 120.0, "Plan should be U+TP = 90+30 = 120 minutes")
+        self.assertEqual(row['Utility Minutes'], 90.0, "Utility should be U = 60+30 = 90 minutes")
 
         # Test formatted time fields
         self.assertEqual(row['Plan'], "02:00", "Plan should be formatted as 02:00")

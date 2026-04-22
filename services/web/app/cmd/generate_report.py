@@ -1358,7 +1358,7 @@ def _get_row_history_main(report_type, tanggal, shift, mc, part_no, proses, oper
             "output": int(summary_row.get("Qty", 0)),
             "reject": int(summary_row.get("Reject", 0)),
             "plan": summary_row.get("Plan", "00:00"),
-            "rt": summary_row.get("Utility", "00:00"),
+            "utility": summary_row.get("Utility", "00:00"),  # U : Utility - the actual running time
             "tp": summary_row.get("TP", "00:00"),
             "ts": summary_row.get("TS", "00:00"),
             "qc": summary_row.get("QC", "00:00"),

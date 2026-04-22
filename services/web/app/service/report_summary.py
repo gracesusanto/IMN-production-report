@@ -8,7 +8,7 @@ import pandas as pd
 
 import app.service.utils as ru
 
-CATEGORY_CODES = ("RT", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BR", "BT")
+CATEGORY_CODES = ("U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BR", "BT")
 
 
 # TODO: Re-implement contextual Keterangan helper after debugging
@@ -33,7 +33,7 @@ CATEGORY_CODES = ("RT", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "B
 # Assumption for v1 summary logic:
 # - NP, BT, NO are outside counted plan
 # - change these constants if business finalizes a different rule later
-PLAN_INCLUDED_CODES = frozenset({"RT", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR"})
+PLAN_INCLUDED_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR"})
 
 
 def _report_category_value(report_category: Any) -> str:
@@ -433,7 +433,7 @@ def _convert_rows_to_api_format(df: pd.DataFrame, report_category: Any) -> list:
             "plan_minutes": int(row.get("Plan Minutes", 0)),
             "plan": row.get("Plan", "00:00"),
             "utility_minutes": int(row.get("Utility Minutes", 0)),
-            "rt": row.get("Utility", "00:00"),
+            "utility": row.get("Utility", "00:00"),  # U : Utility - the actual running time
             "downtime_minutes": int(row.get("Downtime Minutes", 0)),
             "downtime": row.get("Total Downtime", "00:00"),
 
@@ -550,7 +550,7 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
 
             # Time fields - use summarized columns with proper fallbacks
             "plan": row.get("Plan", "00:00"),
-            "rt": row.get("Utility", "00:00"),  # RT = Runtime/Utility time
+            "utility": row.get("Utility", "00:00"),  # U : Utility - the actual running time
             "tp": row.get("TP", "00:00"),
             "ts": row.get("TS", "00:00"),
             "qc": row.get("QC", "00:00"),
@@ -688,7 +688,7 @@ def summarize_dashboard_df(df: pd.DataFrame, report_category: Any) -> pd.DataFra
     #         grouped.drop(columns=["_OperatorCount"], inplace=True)
 
     grouped["Total Output"] = grouped["Qty"] + grouped["Reject"] + grouped["Rework"]
-    grouped["Utility Minutes"] = grouped.get("RT_Minutes", 0.0)
+    grouped["Utility Minutes"] = grouped.get("U_Minutes", 0.0)
     grouped["Plan Minutes"] = 0.0
     for code in PLAN_INCLUDED_CODES:
         grouped["Plan Minutes"] += grouped.get(f"{code}_Minutes", 0.0)
