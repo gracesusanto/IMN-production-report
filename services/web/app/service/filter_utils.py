@@ -7,11 +7,54 @@ from pandas.api.types import (
 from typing import Optional
 
 PUBLIC_TO_INTERNAL_FILTER_COLUMNS = {
+    # legacy/detail report helpers
     "Productivity": "_ProductivityNum",
     "Reject Ratio": "_RejectRatioNum",
     "Rework Ratio": "_ReworkRatioNum",
     "StartTime": "_StartTs",
     "StopTime": "_StopTs",
+
+    # dashboard summary numeric fields
+    "target_per_jam": "Target",
+    "target_qty": "Target Qty",
+    "output": "Qty",
+    "reject": "Reject",
+    "rework": "Rework",
+
+    # display aliases -> numeric minute fields
+    "plan": "Plan Minutes",
+    "utility": "Utility Minutes",
+    "total_dt": "Downtime Minutes",
+
+    "tp": "TP_Minutes",
+    "ts": "TS_Minutes",
+    "qc": "QC_Minutes",
+    "cm": "CM_Minutes",
+    "no": "NO_Minutes",
+    "np": "NP_Minutes",
+    "nm": "NM_Minutes",
+    "mp": "MP_Minutes",
+    "bt": "BT_Minutes",
+    "br": "BR_Minutes",
+    "tl": "TL_Minutes",
+
+    # KPI numeric fields
+    "per": "PER Num",
+    "otr": "OTR Num",
+    "qr": "QR Num",
+    "oee": "OEE Num",
+
+    # identity fields
+    "mc": "MC",
+    "mc_no": "MC",
+    "operator": "Operator",
+    "nik": "NIK",
+    "part_no": "Part No",
+    "part_name": "Part Name",
+    "proses": "Proses",
+    "tanggal": "Tanggal",
+    "shift": "Shift",
+    "catatan": "Keterangan",
 }
 
 def _resolve_filter_column(df: pd.DataFrame, field: str) -> Optional[str]:
