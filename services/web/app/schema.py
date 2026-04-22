@@ -226,6 +226,7 @@ class RowHistoryRequest(BaseModel):
     part_no: str
     proses: str
     operator: Optional[str] = None  # Required for operator reports
+    source_activity_ids: Optional[list[int]] = None  # For lineage-based history lookup
 
 
 class TimelineActivity(BaseModel):

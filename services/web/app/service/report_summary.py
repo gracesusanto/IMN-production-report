@@ -54,6 +54,21 @@ def _minutes_to_hhmm(minutes: float) -> str:
     return f"{hours:02d}:{mins:02d}"
 
 
+def _collect_unique_ids(values: pd.Series) -> list[int]:
+    """Collect unique activity IDs for lineage tracking"""
+    seen = []
+    for value in values.tolist():
+        if pd.isna(value):
+            continue
+        try:
+            ivalue = int(value)
+        except Exception:
+            continue
+        if ivalue not in seen:
+            seen.append(ivalue)
+    return seen
+
+
 def _pct(numerator: float, denominator: float) -> float:
     if denominator <= 0:
         return 0.0
@@ -67,6 +82,21 @@ def _join_unique(values: pd.Series) -> str:
         if value and value not in seen:
             seen.append(value)
     return " | ".join(seen)
+
+
+def _collect_unique_ids(values: pd.Series) -> list[int]:
+    """Collect unique non-null activity IDs as list"""
+    seen = []
+    for value in values.tolist():
+        if pd.isna(value):
+            continue
+        try:
+            ivalue = int(value)
+        except Exception:
+            continue
+        if ivalue not in seen:
+            seen.append(ivalue)
+    return seen
 
 
 def _to_utc_timestamp(value):
@@ -520,6 +550,11 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
         target_per_jam = int(row.get("Target", 0))
         target_qty = int(row.get("Target Qty", 0)) if "Target Qty" in row and row.get("Target Qty") else target_per_jam
 
+        # Extract source activity IDs for reliable row history
+        source_activity_ids = row.get("ActivityMesinId", [])
+        if not isinstance(source_activity_ids, list):
+            source_activity_ids = [source_activity_ids] if source_activity_ids not in [None, "", "-"] else []
+
         # Build history_key for row lineage
         history_key = {
             "report_type": str(report_category).split(".")[-1].lower(),  # Extract "mesin" or "operator" from ReportCategory
@@ -527,7 +562,8 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
             "shift": str(row.get("Shift", "")),
             "mc": row.get("MC", "-"),
             "part_no": row.get("Part No", "-"),
-            "proses": row.get("Proses", "-")
+            "proses": row.get("Proses", "-"),
+            "source_activity_ids": source_activity_ids,
         }
 
         # Add operator for operator reports
@@ -624,10 +660,23 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
 
 
 def summarize_dashboard_df(df: pd.DataFrame, report_category: Any) -> pd.DataFrame:
+    """
+    Raw dataframe -> split by shift -> summarize.
+    Use this only when input is raw fact rows.
+    """
     split_df = split_rows_by_shift(df)
-    if split_df.empty:
-        return split_df
+    return summarize_already_split_df(split_df, report_category)
 
+
+def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> pd.DataFrame:
+    """
+    Already-split dataframe -> summarize.
+    Use this for dashboard summary and row history reconstruction.
+    """
+    if split_df is None or split_df.empty:
+        return pd.DataFrame()
+
+    split_df = split_df.copy()
     category_value = _report_category_value(report_category)
 
     for code in CATEGORY_CODES:
@@ -658,6 +707,10 @@ def summarize_dashboard_df(df: pd.DataFrame, report_category: Any) -> pd.DataFra
         "_StartTs": "min",
         "_StopTs": "max",
     }
+
+    # Preserve source lineage for reliable row history
+    if "ActivityMesinId" in split_df.columns:
+        agg_map["ActivityMesinId"] = _collect_unique_ids
 
     if "Kode Tooling" in split_df.columns:
         agg_map["Kode Tooling"] = _join_unique

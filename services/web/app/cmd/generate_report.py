@@ -1200,6 +1200,7 @@ def get_row_history(
     part_no: str,
     proses: str,
     operator: str = None,
+    source_activity_ids: list[int] | None = None,
 ):
     """
     Get the detailed history and calculation breakdown for a specific summary row.
@@ -1209,10 +1210,24 @@ def get_row_history(
 
     print(f"Row history request: {report_type} {mc} {part_no} {proses} on {tanggal} shift {shift}")
     print(f"DEBUG: Exact request payload - MC='{mc}', Part_No='{part_no}', Proses='{proses}', Date='{tanggal}', Shift='{shift}', Operator='{operator}'")
+    print(f"DEBUG: Source activity IDs: {source_activity_ids}")
+
+    # Prioritize lineage-based history using source activity IDs
+    if source_activity_ids:
+        return _get_row_history_by_ids(
+            report_type=report_type,
+            tanggal=tanggal,
+            shift=shift,
+            mc=mc,
+            part_no=part_no,
+            proses=proses,
+            operator=operator,
+            source_activity_ids=source_activity_ids,
+        )
 
     DEBUG_ROW_HISTORY = True  # Enable debug mode
 
-    # Use hybrid approach: try main reconstruction, fallback if needed
+    # Fallback to grain-based reconstruction
     try:
         result = _get_row_history_main(report_type, tanggal, shift, mc, part_no, proses, operator)
 
@@ -1408,6 +1423,267 @@ def _get_row_history_main(report_type, tanggal, shift, mc, part_no, proses, oper
             "timeline": timeline,
             "calculation": calculation
         }
+
+
+def _get_row_history_by_ids(
+    report_type: str,
+    tanggal: str,
+    shift: str,
+    mc: str,
+    part_no: str,
+    proses: str,
+    operator: str = None,
+    source_activity_ids: list[int] | None = None,
+):
+    """
+    Get row history using exact source activity IDs.
+    This is more reliable than grain-based reconstruction.
+    """
+    report_category = ReportCategory.MESIN if report_type == "mesin" else ReportCategory.OPERATOR
+
+    if not source_activity_ids:
+        return {
+            "summary": {},
+            "timeline": [],
+            "calculation": {},
+            "found": False,
+            "error": "No source activity ids provided"
+        }
+
+    # Fetch exact source activities by ID
+    with SessionLocal() as session:
+        rows = (
+            session.query(models.ReportActivityFact)
+            .filter(models.ReportActivityFact.activity_mesin_id.in_(source_activity_ids))
+            .order_by(models.ReportActivityFact.start_ts_utc.asc())
+            .all()
+        )
+
+    raw_df = _fact_rows_to_dataframe(rows, report_category)
+    if raw_df.empty:
+        return {
+            "summary": {},
+            "timeline": [],
+            "calculation": {},
+            "found": False,
+            "error": "No fact rows found for source activity ids"
+        }
+
+    # Re-summarize using the same logic as dashboard (avoid double-splitting)
+    split_df = rs.split_rows_by_shift(raw_df)
+    summary_df = rs.summarize_already_split_df(split_df, report_category)
+
+    from datetime import datetime
+    date_obj = datetime.strptime(tanggal, "%Y-%m-%d").date()
+    shift_num = int(shift)
+
+    # Apply date/shift filtering
+    final_summary = _apply_date_shift_filter(summary_df, date_obj, date_obj, shift_num, shift_num)
+
+    # Filter by operator if needed
+    if report_type == "operator" and operator and not final_summary.empty:
+        final_summary = final_summary[final_summary["Operator"] == operator]
+
+    # Filter by grain to get the exact matching row
+    final_summary = final_summary[
+        (final_summary["MC"] == mc) &
+        (final_summary["Part No"] == part_no) &
+        (final_summary["Proses"] == proses)
+    ]
+
+    if final_summary.empty:
+        return {
+            "summary": {},
+            "timeline": [],
+            "calculation": {},
+            "found": False,
+            "error": "Could not rebuild summary row from source activity ids"
+        }
+
+    summary_row = final_summary.iloc[0]
+
+    # Build timeline from split activities
+    split_df = rs.split_rows_by_shift(raw_df)
+
+    timeline = []
+    for _, activity in split_df.iterrows():
+        activity_date = pd.to_datetime(activity.get("Tanggal")).date() if "Tanggal" in activity else None
+        activity_shift = int(activity.get("Shift", 0)) if "Shift" in activity else 0
+
+        # Only include activities matching the requested date/shift
+        if activity_date == date_obj and activity_shift == shift_num:
+            start_time = activity.get("_StartTs")
+            stop_time = activity.get("_StopTs")
+
+            if isinstance(start_time, pd.Timestamp):
+                start_time = start_time.tz_convert(ru.JAKARTA_TZ).isoformat()
+            if isinstance(stop_time, pd.Timestamp):
+                stop_time = stop_time.tz_convert(ru.JAKARTA_TZ).isoformat()
+
+            timeline.append({
+                "start_time": str(start_time),
+                "stop_time": str(stop_time),
+                "desc": activity.get("Desc", ""),
+                "duration_minutes": float(activity.get("_DurationMinutes", 0)),
+                "qty": int(activity.get("Qty", 0)),
+                "reject": int(activity.get("Reject", 0)),
+                "rework": int(activity.get("Rework", 0)),
+                "operator": activity.get("Operator", "-"),
+                "mc": activity.get("MC", "-"),
+                "part_no": activity.get("Part No", "-"),
+                "proses": activity.get("Proses", "-"),
+                "keterangan": activity.get("Keterangan", ""),
+                "activity_mesin_id": activity.get("ActivityMesinId"),
+            })
+
+    # Build summary response
+    target_per_jam = int(summary_row.get("Target", 0))
+    target_qty = int(summary_row.get("Target Qty", 0)) if "Target Qty" in summary_row else target_per_jam
+
+    summary = {
+        "status": rs._derive_status_from_row(summary_row),
+        "operator": summary_row.get("Operator", "-"),
+        "mc_no": summary_row.get("MC", "-"),
+        "part_no_name": f"{summary_row.get('Part No', '-')} {summary_row.get('Part Name', '-')}".strip(),
+        "proses": summary_row.get("Proses", "-"),
+        "target_per_jam": target_per_jam,
+        "target_qty": target_qty,
+        "output": int(summary_row.get("Qty", 0)),
+        "reject": int(summary_row.get("Reject", 0)),
+        "rework": int(summary_row.get("Rework", 0)),
+        "plan": summary_row.get("Plan", "00:00"),
+        "rt": summary_row.get("Utility", "00:00"),
+        "utility": summary_row.get("Utility", "00:00"),
+        "tp": summary_row.get("TP", "00:00"),
+        "ts": summary_row.get("TS", "00:00"),
+        "qc": summary_row.get("QC", "00:00"),
+        "cm": summary_row.get("CM", "00:00"),
+        "no": summary_row.get("NO", "00:00"),
+        "np": summary_row.get("NP", "00:00"),
+        "nm": summary_row.get("NM", "00:00"),
+        "mp": summary_row.get("MP", "00:00"),
+        "bt": summary_row.get("BT", "00:00"),
+        "br": summary_row.get("BR", "00:00"),
+        "tl": summary_row.get("TL", "00:00"),
+        "total_dt": summary_row.get("Total Downtime", "00:00"),
+        "per": summary_row.get("PER", "0%"),
+        "otr": summary_row.get("OTR", "0%"),
+        "qr": summary_row.get("QR", "0%"),
+        "oee": summary_row.get("OEE", "0%"),
+        "tanggal": tanggal,
+        "shift": shift,
+    }
+
+    # Build operator sessions with category totals
+    import numpy as np
+
+    # Add desc code if not already present
+    if "Desc Code" not in split_df.columns:
+        split_df["Desc Code"] = split_df["Desc"].map(lambda desc: str(desc).split(":")[0].strip().upper()[:2] if desc else "")
+
+    # Build per-operator category minute columns
+    category_codes = ["U", "TP", "TS", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR", "TL"]  # Using U instead of RT
+    operator_work = split_df.copy()
+
+    for code in category_codes:
+        operator_work[f"{code}_Minutes"] = np.where(
+            operator_work["Desc Code"] == code,
+            operator_work["_DurationMinutes"],
+            0.0,
+        )
+
+    agg_map = {
+        "_DurationMinutes": "sum",
+        "ActivityMesinId": "count",
+    }
+    for code in category_codes:
+        agg_map[f"{code}_Minutes"] = "sum"
+
+    operator_grouped = (
+        operator_work.groupby("Operator", dropna=False)
+        .agg(agg_map)
+        .reset_index()
+    )
+
+    operator_sessions = []
+    for _, op_row in operator_grouped.iterrows():
+        runtime_minutes = float(op_row.get("U_Minutes", 0) or 0)  # Use U instead of RT
+        total_minutes = float(op_row.get("_DurationMinutes", 0) or 0)
+
+        category_minutes = {
+            "rt_minutes": runtime_minutes,  # Keep rt for frontend compatibility
+            "tp_minutes": float(op_row.get("TP_Minutes", 0) or 0),
+            "ts_minutes": float(op_row.get("TS_Minutes", 0) or 0),
+            "qc_minutes": float(op_row.get("QC_Minutes", 0) or 0),
+            "cm_minutes": float(op_row.get("CM_Minutes", 0) or 0),
+            "no_minutes": float(op_row.get("NO_Minutes", 0) or 0),
+            "np_minutes": float(op_row.get("NP_Minutes", 0) or 0),
+            "nm_minutes": float(op_row.get("NM_Minutes", 0) or 0),
+            "mp_minutes": float(op_row.get("MP_Minutes", 0) or 0),
+            "bt_minutes": float(op_row.get("BT_Minutes", 0) or 0),
+            "br_minutes": float(op_row.get("BR_Minutes", 0) or 0),
+            "tl_minutes": float(op_row.get("TL_Minutes", 0) or 0),
+        }
+
+        main_loss_code = None
+        main_loss_minutes = 0.0
+        for code_key, minutes in [
+            ("TP", category_minutes["tp_minutes"]),
+            ("TS", category_minutes["ts_minutes"]),
+            ("QC", category_minutes["qc_minutes"]),
+            ("CM", category_minutes["cm_minutes"]),
+            ("NO", category_minutes["no_minutes"]),
+            ("NP", category_minutes["np_minutes"]),
+            ("NM", category_minutes["nm_minutes"]),
+            ("MP", category_minutes["mp_minutes"]),
+            ("BT", category_minutes["bt_minutes"]),
+            ("BR", category_minutes["br_minutes"]),
+            ("TL", category_minutes["tl_minutes"]),
+        ]:
+            if minutes > main_loss_minutes:
+                main_loss_code = code_key
+                main_loss_minutes = minutes
+
+        operator_sessions.append({
+            "operator": op_row.get("Operator", "-"),
+            "sessions": int(op_row.get("ActivityMesinId", 0) or 0),
+            "total_minutes": total_minutes,
+            "runtime_minutes": runtime_minutes,
+            "main_loss_code": main_loss_code,
+            "main_loss_minutes": main_loss_minutes,
+            **category_minutes,
+        })
+
+    # Sort operator sessions by total time
+    operator_sessions = sorted(
+        operator_sessions,
+        key=lambda x: (-float(x.get("total_minutes", 0) or 0), str(x.get("operator", "")))
+    )
+
+    # Build calculation breakdown
+    calculation = {
+        "plan_minutes": float(summary_row.get("Plan Minutes", 0)),
+        "utility_minutes": float(summary_row.get("Utility Minutes", 0)),
+        "downtime_minutes": float(summary_row.get("Downtime Minutes", 0)),
+        "target_per_jam": target_per_jam,
+        "target_qty": target_qty,
+        "per_num": float(summary_row.get("PER Num", 0)),
+        "otr_num": float(summary_row.get("OTR Num", 0)),
+        "qr_num": float(summary_row.get("QR Num", 0)),
+        "oee_num": float(summary_row.get("OEE Num", 0)),
+        "per_formula": "output / (utility_hours * target_per_jam)",
+        "otr_formula": "utility_minutes / plan_minutes",
+        "qr_formula": "output / (output + reject + rework)",
+        "oee_formula": "otr * per * qr",
+    }
+
+    return {
+        "summary": summary,
+        "timeline": timeline,
+        "operator_sessions": operator_sessions,
+        "calculation": calculation,
+        "found": True,
+    }
 
 
 def _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator=None):

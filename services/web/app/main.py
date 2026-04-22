@@ -313,7 +313,8 @@ def get_dashboard_row_history(request: schema.RowHistoryRequest):
         mc=request.mc,
         part_no=request.part_no,
         proses=request.proses,
-        operator=request.operator
+        operator=request.operator,
+        source_activity_ids=request.source_activity_ids
     )
 
 
