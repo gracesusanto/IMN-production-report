@@ -1541,7 +1541,7 @@ def _get_row_history_by_ids(
     target_qty = int(summary_row.get("Target Qty", 0)) if "Target Qty" in summary_row else target_per_jam
 
     summary = {
-        "status": rs._derive_status_from_row(summary_row),
+        "status": summary_row.get("Status", "OK"),
         "operator": summary_row.get("Operator", "-"),
         "mc_no": summary_row.get("MC", "-"),
         "part_no_name": f"{summary_row.get('Part No', '-')} {summary_row.get('Part Name', '-')}".strip(),
@@ -1594,7 +1594,7 @@ def _get_row_history_by_ids(
 
     agg_map = {
         "_DurationMinutes": "sum",
-        "ActivityMesinId": "count",
+        "ActivityMesinId": pd.Series.nunique,
     }
     for code in category_codes:
         agg_map[f"{code}_Minutes"] = "sum"
@@ -1646,6 +1646,7 @@ def _get_row_history_by_ids(
 
         operator_sessions.append({
             "operator": op_row.get("Operator", "-"),
+            "activities_count": int(op_row.get("ActivityMesinId", 0) or 0),
             "sessions": int(op_row.get("ActivityMesinId", 0) or 0),
             "total_minutes": total_minutes,
             "runtime_minutes": runtime_minutes,
@@ -1654,11 +1655,44 @@ def _get_row_history_by_ids(
             **category_minutes,
         })
 
-    # Sort operator sessions by total time
-    operator_sessions = sorted(
-        operator_sessions,
-        key=lambda x: (-float(x.get("total_minutes", 0) or 0), str(x.get("operator", "")))
-    )
+    def _operator_session_sort_key(session: dict):
+        rt = float(session.get("runtime_minutes", 0) or 0)
+
+        downtime_minutes = sum([
+            float(session.get("tp_minutes", 0) or 0),
+            float(session.get("ts_minutes", 0) or 0),
+            float(session.get("qc_minutes", 0) or 0),
+            float(session.get("cm_minutes", 0) or 0),
+            float(session.get("no_minutes", 0) or 0),
+            float(session.get("nm_minutes", 0) or 0),
+            float(session.get("mp_minutes", 0) or 0),
+            float(session.get("tl_minutes", 0) or 0),
+        ])
+
+        bt_br_np_minutes = sum([
+            float(session.get("bt_minutes", 0) or 0),
+            float(session.get("br_minutes", 0) or 0),
+            float(session.get("np_minutes", 0) or 0),
+        ])
+
+        # tier: smaller is higher priority
+        if rt > 0:
+            tier = 1
+        elif downtime_minutes > 0:
+            tier = 2
+        else:
+            tier = 3
+
+        return (
+            tier,
+            -rt,
+            -downtime_minutes,
+            -bt_br_np_minutes,
+            str(session.get("operator", "")),
+        )
+
+    # Sort operator sessions by business priority (RT first, then downtime, then BT/BR/NP)
+    operator_sessions = sorted(operator_sessions, key=_operator_session_sort_key)
 
     # Build calculation breakdown
     calculation = {

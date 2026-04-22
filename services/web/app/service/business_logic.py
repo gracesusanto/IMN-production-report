@@ -6,6 +6,7 @@ from datetime import timedelta
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import not_, or_, and_, String, Text
+from sqlalchemy.orm import aliased
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
@@ -29,11 +30,24 @@ SETUP_CATEGORY = ["TL : Trial", "TS : Tooling Setting", "TP : Tooling Problem"]
 # Dipakai di /activity/status supaya tidak usah menampilkan kegiatan operator yang NP
 NO_PLAN_CATEGORY = ["NP : No Plan"]
 
+# Category code sets for consistent checking
+NON_MACHINE_CODES = {"NP", "BT", "BR"}
+SETUP_CODES = {"TL", "TS", "TP"}
+
+
+def _category_code(category: str) -> str:
+    """Extract 2-letter category code from full category string"""
+    if not category:
+        return ""
+    return str(category).split(":")[0].strip().upper()
+
+
 def is_non_machine_category(category: str) -> bool:
-    return category in NON_MACHINE_CATEGORY
+    return _category_code(category) in NON_MACHINE_CODES
+
 
 def is_setup_category(category: str) -> bool:
-    return category in SETUP_CATEGORY
+    return _category_code(category) in SETUP_CODES
 
 def get_operator_active_machines(operator_id: str, exclude: list[str], session):
     """
@@ -43,7 +57,7 @@ def get_operator_active_machines(operator_id: str, exclude: list[str], session):
     activities = (
         session.query(models.ActivityMesin)
         .filter(models.ActivityMesin.operator_id == operator_id)
-        .filter(models.ActivityMesin.stop_time_id == None)  # Only active activities
+        .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
         .filter(~models.ActivityMesin.category.in_(exclude))  # Exclude exact matches
         .all()
     )
@@ -59,7 +73,7 @@ def get_machine_active_operators(mesin_id, exclude: list[str], session):
     return (
         session.query(models.ActivityMesin)
         .filter(models.ActivityMesin.mesin_id == mesin_id)
-        .filter(models.ActivityMesin.stop_time_id == None)  # Only active activities
+        .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
         .filter(~models.ActivityMesin.category.in_(exclude))  # Exclude exact matches
         .all()
     )
@@ -178,10 +192,31 @@ def process_activity(activity, session):
 
     # 5) Start the next activity
     next_is_non_machine = is_non_machine_category(next_category)
+
+    target_mesin_id = None if next_is_non_machine else mesin_id
+    target_tooling_id = None if next_is_non_machine else tooling_id
+
+    # Check for existing identical active activity to prevent duplicates
+    existing_active = (
+        session.query(models.ActivityMesin)
+        .filter(
+            models.ActivityMesin.operator_id == operator_id,
+            models.ActivityMesin.category == next_category,
+            models.ActivityMesin.stop_time_id.is_(None),
+            models.ActivityMesin.mesin_id.is_(target_mesin_id) if target_mesin_id is None else models.ActivityMesin.mesin_id == target_mesin_id,
+            models.ActivityMesin.tooling_id.is_(target_tooling_id) if target_tooling_id is None else models.ActivityMesin.tooling_id == target_tooling_id,
+        )
+        .first()
+    )
+
+    if existing_active:
+        session.commit()
+        return
+
     new_activity = models.ActivityMesin(
-        mesin_id=None if next_is_non_machine else mesin_id,
+        mesin_id=target_mesin_id,
         operator_id=operator_id,
-        tooling_id=None if next_is_non_machine else tooling_id,
+        tooling_id=target_tooling_id,
         category=next_category,
         start_time_id=new_log.id,
         stop_time_id=None,
@@ -209,9 +244,8 @@ def _determine_new_mesin_status(downtime_category):
     :param downtime_category: The category of downtime that caused the machine to stop.
     :return: The new `MesinStatus` (`SETUP` or `IDLE`).
     """
-    downtime_category_initial = _get_downtime_category(downtime_category)
-
-    return models.Status.SETUP if downtime_category_initial in ["TL", "TS", "TP"] else models.Status.IDLE
+    code = _category_code(downtime_category)
+    return models.Status.SETUP if code in SETUP_CODES else models.Status.IDLE
 
 
 def _get_displayed_status(downtime_category):
@@ -232,11 +266,10 @@ def _get_displayed_status(downtime_category):
     :param downtime_category: The category of downtime affecting the machine.
     :return: The new `DisplayedStatus` (`IDLE` or `DOWNTIME`).
     """
-    downtime_category_initial = _get_downtime_category(downtime_category)
-
+    code = _category_code(downtime_category)
     return (
         models.DisplayedStatus.IDLE
-        if downtime_category_initial in ["NP", "BT", "BR"]
+        if code in NON_MACHINE_CODES
         else models.DisplayedStatus.DOWNTIME
     )
 
@@ -655,12 +688,107 @@ def export_model_csv(model, model_name, session):
 
 
 def _get_downtime_category(downtime_category):
-    return downtime_category[:2].upper()
+    return _category_code(downtime_category)
 
 
 def _update_downtime_mesin_status(downtime_category):
     return (
         models.Status.SETUP
-        if _get_downtime_category(downtime_category) in ["TP", "TS", "TL"]
+        if _category_code(downtime_category) in SETUP_CODES
         else models.Status.IDLE
     )
+
+
+def _dashboard_status_code_from_category(category: str) -> str:
+    """Convert category to dashboard status code"""
+    code = _category_code(category)
+    return "OK" if code == "U" else code
+
+
+def _status_bucket(category: str) -> int:
+    """
+    Lower number = higher priority.
+    Priority:
+    0 = Utility / running
+    1 = machine downtime
+    2 = non-machine statuses
+    3 = fallback
+    """
+    code = _category_code(category)
+
+    if code == "U":
+        return 0
+    if code in NON_MACHINE_CODES:
+        return 2
+    if code:
+        return 1
+    return 3
+
+
+def resolve_current_machine_status(machine_id: str, session):
+    """
+    Single source of truth for current machine status.
+    Returns one chosen active activity for the machine.
+    """
+    start_log = aliased(models.MesinLog)
+
+    activities = (
+        session.query(
+            models.ActivityMesin.id.label("activity_id"),
+            models.ActivityMesin.mesin_id.label("mesin_id"),
+            models.ActivityMesin.tooling_id.label("tooling_id"),
+            models.ActivityMesin.operator_id.label("operator_id"),
+            models.ActivityMesin.category.label("category"),
+            start_log.timestamp.label("start_ts"),
+            models.Mesin.name.label("machine_name"),
+            models.Operator.name.label("operator_name"),
+        )
+        .join(start_log, models.ActivityMesin.start_time_id == start_log.id)
+        .outerjoin(models.Mesin, models.ActivityMesin.mesin_id == models.Mesin.id)
+        .outerjoin(models.Operator, models.ActivityMesin.operator_id == models.Operator.id)
+        .filter(models.ActivityMesin.stop_time_id.is_(None))
+        .filter(models.ActivityMesin.mesin_id == machine_id)
+        .all()
+    )
+
+    if not activities:
+        return {
+            "machine_id": machine_id,
+            "machine_name": None,
+            "status_code": "IDLE",
+            "status_label": "IDLE",
+            "category": None,
+            "operator_id": None,
+            "operator_name": None,
+            "tooling_id": None,
+            "start_ts": None,
+        }
+
+    def sort_key(a):
+        return (
+            _status_bucket(a.category),   # Utility first, then DT, then NP/BT/BR
+            -a.start_ts.timestamp(),      # latest started wins inside same bucket
+        )
+
+    chosen = sorted(activities, key=sort_key)[0]
+    status_code = _dashboard_status_code_from_category(chosen.category)
+
+    return {
+        "machine_id": chosen.mesin_id,
+        "machine_name": chosen.machine_name,
+        "status_code": status_code,
+        "status_label": "OK" if status_code == "OK" else chosen.category,
+        "category": chosen.category,
+        "operator_id": chosen.operator_id,
+        "operator_name": chosen.operator_name,
+        "tooling_id": chosen.tooling_id,
+        "start_ts": chosen.start_ts.isoformat() if chosen.start_ts else None,
+    }
+
+
+def get_current_machine_status_map(session, machine_ids: list[str]):
+    """Get current status for multiple machines"""
+    result = {}
+    for machine_id in machine_ids:
+        result[machine_id] = resolve_current_machine_status(machine_id, session)
+    return result

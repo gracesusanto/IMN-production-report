@@ -71,7 +71,8 @@ def get_operator_status(operator_id: str, session=Sessioner):
     # NP, BR, BT (Non Machine Category) --> STOP     --> Mulai Aktivitas Baru dan Akhiri {category} --> Pick new activity
     # Others: machine related downtime  --> DOWNTIME --> Ganti kategori downtime with the appropriate input boxes
     def get_mesin_status_from_category(category):
-        if category == "U ":
+        code = business_logic._category_code(category)
+        if code == "U":
             return "RUNNING"
         elif business_logic.is_non_machine_category(category):
             return "STOP"
@@ -93,7 +94,7 @@ def get_operator_status(operator_id: str, session=Sessioner):
             "mesinId": activity.mesin_id,
             "toolingId": activity.tooling_id,
             "category": activity.category,
-            "mesinStatus": get_mesin_status_from_category(activity.category[:2])
+            "mesinStatus": get_mesin_status_from_category(activity.category)
         })
 
 
@@ -213,11 +214,14 @@ def get_activity_status(request: schema.ActivityStatusRequest, session=Sessioner
     # TS, TL, TP --> SETUP   --> reject, rework
     # else       --> IDLE    --> no need to submit anything
     def get_mesin_status_from_category(full_category):
-        category = full_category[:2]
-        if category == "U ":
+        code = business_logic._category_code(full_category)
+
+        if code == "U":
             return "RUNNING"
-        elif business_logic.is_setup_category(category):
+        elif business_logic.is_setup_category(full_category):
             return "SETUP"
+        elif business_logic.is_non_machine_category(full_category):
+            return "STOP"
         else:
             return "IDLE"
 
@@ -476,36 +480,111 @@ def get_mesin_status(session=Sessioner):
     try:
         start_log_alias = aliased(models.MesinLog, name="start_log")
 
-        # Get active activities (stop_time_id is None)
-        mesin_status = (
+        # Rank active rows so we keep only the latest row
+        # for the exact same (mesin_id, tooling_id, operator_id)
+        ranked_subq = (
             session.query(
-                func.to_char(
-                    func.timezone("Asia/Jakarta", start_log_alias.timestamp),
-                    "YYYY-MM-DD HH24:MI:SS"
-                ).label("Start Time"),
-                models.ActivityMesin.mesin_id.label("Mesin"),
-                models.ActivityMesin.tooling_id.label("Tooling"),
-                models.ActivityMesin.operator_id.label("Operator"),
-                models.ActivityMesin.category.label("Status"),
+                models.ActivityMesin.id.label("activity_id"),
+                models.ActivityMesin.mesin_id.label("mesin_id"),
+                models.ActivityMesin.tooling_id.label("tooling_id"),
+                models.ActivityMesin.operator_id.label("operator_id"),
+                models.ActivityMesin.category.label("category"),
+                start_log_alias.timestamp.label("start_ts"),
+                func.row_number().over(
+                    partition_by=[
+                        models.ActivityMesin.mesin_id,
+                        models.ActivityMesin.tooling_id,
+                        models.ActivityMesin.operator_id,
+                    ],
+                    order_by=[
+                        desc(start_log_alias.timestamp),
+                        desc(models.ActivityMesin.id),
+                    ],
+                ).label("rn"),
             )
             .join(start_log_alias, models.ActivityMesin.start_time_id == start_log_alias.id)
-            .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
-            .filter(models.ActivityMesin.mesin_id.isnot(None))     # Must have a machine
-            .filter(models.ActivityMesin.mesin_id != "")           # Must not be empty string
-            .filter(~models.ActivityMesin.category.startswith("NP"))  # Exclude "No Plan"
-            .order_by(desc(start_log_alias.timestamp))  # Latest active activities first
+            .filter(models.ActivityMesin.stop_time_id.is_(None))
+            .filter(models.ActivityMesin.mesin_id.isnot(None))
+            .filter(models.ActivityMesin.mesin_id != "")
+            .filter(~models.ActivityMesin.category.startswith("NP"))
+            .subquery()
+        )
+
+        results = (
+            session.query(
+                ranked_subq.c.activity_id.label("ActivityId"),
+                func.to_char(
+                    func.timezone("Asia/Jakarta", ranked_subq.c.start_ts),
+                    "YYYY-MM-DD HH24:MI:SS"
+                ).label("Start Time"),
+
+                # Pretty display names
+                models.Mesin.name.label("Mesin"),
+                models.Tooling.common_tooling_name.label("Tooling Name"),
+                models.Tooling.kode_tooling.label("Kode Tooling"),
+                models.Operator.name.label("Operator"),
+
+                # Keep IDs too for debugging / future UI use
+                ranked_subq.c.mesin_id.label("MesinId"),
+                ranked_subq.c.tooling_id.label("ToolingId"),
+                ranked_subq.c.operator_id.label("OperatorId"),
+
+                ranked_subq.c.category.label("Status"),
+            )
+            .outerjoin(models.Mesin, models.Mesin.id == ranked_subq.c.mesin_id)
+            .outerjoin(models.Tooling, models.Tooling.id == ranked_subq.c.tooling_id)
+            .outerjoin(models.Operator, models.Operator.id == ranked_subq.c.operator_id)
+            .filter(ranked_subq.c.rn == 1)
+            .order_by(desc(ranked_subq.c.start_ts))
             .all()
         )
 
-        print(f"Mesin status query returned {len(mesin_status)} results")
-        return {"details": mesin_status}
+        details = []
+        for row in results:
+            # Handle both tuple and row mapping access
+            if hasattr(row, '_mapping'):
+                row_data = row._mapping
+            else:
+                # Fallback for tuple results
+                row_data = {
+                    "ActivityId": row[0] if len(row) > 0 else None,
+                    "Start Time": row[1] if len(row) > 1 else None,
+                    "Mesin": row[2] if len(row) > 2 else None,
+                    "Tooling Name": row[3] if len(row) > 3 else None,
+                    "Kode Tooling": row[4] if len(row) > 4 else None,
+                    "Operator": row[5] if len(row) > 5 else None,
+                    "MesinId": row[6] if len(row) > 6 else None,
+                    "ToolingId": row[7] if len(row) > 7 else None,
+                    "OperatorId": row[8] if len(row) > 8 else None,
+                    "Status": row[9] if len(row) > 9 else None,
+                }
+
+            # Combine tooling name and code for display
+            tooling_name = row_data.get("Tooling Name") or "-"
+            kode_tooling = row_data.get("Kode Tooling") or "-"
+            combined_tooling = f"{tooling_name} / {kode_tooling}" if tooling_name != "-" or kode_tooling != "-" else "-"
+
+            details.append({
+                "activity_id": row_data.get("ActivityId"),
+                "start_time": row_data.get("Start Time"),
+                "mesin": row_data.get("Mesin") or row_data.get("MesinId"),
+                "tooling": combined_tooling,
+                "operator": row_data.get("Operator") or row_data.get("OperatorId"),
+                "status": row_data.get("Status"),
+
+                # optional raw ids for debugging
+                "mesin_id": row_data.get("MesinId"),
+                "tooling_id": row_data.get("ToolingId"),
+                "operator_id": row_data.get("OperatorId"),
+            })
+
+        print(f"Mesin status query returned {len(details)} results")
+        return {"details": details}
 
     except Exception as e:
         print(f"Error in get_mesin_status: {e}")
         import traceback
         traceback.print_exc()
-
-        # Return empty result instead of failing
         return {"details": [], "error": str(e)}
 
 @app.get("/debug/raw-activities/{date}/{machine}")

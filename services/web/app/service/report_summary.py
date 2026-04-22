@@ -375,6 +375,24 @@ def _build_chart_data(df: pd.DataFrame, report_category: Any) -> dict:
     return charts
 
 
+def _status_from_last_desc(desc: str) -> str:
+    """
+    Derive status from last activity description.
+    If last desc code is RT or U, show status = OK
+    Otherwise show the last desc code.
+    """
+    code = _category_code(desc)
+
+    # Running / utility / runtime should display as OK
+    if code in {"RT", "U"}:
+        return "OK"
+
+    if code in {"TP", "TS", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR", "TL"}:
+        return code
+
+    return "OK"
+
+
 def _derive_status_from_row(row: dict) -> str:
     """
     Derive status from row data based on downtime categories.
@@ -447,7 +465,7 @@ def _convert_rows_to_api_format(df: pd.DataFrame, report_category: Any) -> list:
         api_row = {
             "tanggal": str(row.get("Tanggal", "")),
             "shift": str(row.get("Shift", "")),
-            "status": _derive_status_from_row(row),
+            "status": row.get("Status", "OK"),
             "mc": row.get("MC", "-"),
             "part_no": row.get("Part No", "-"),
             "part_name": row.get("Part Name", "-"),
@@ -572,7 +590,7 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
 
         detail_row = {
             # Excel column order exactly
-            "status": _derive_status_from_row(row),
+            "status": row.get("Status", "OK"),
             "operator": row.get("Operator", "-"),
             "mc_no": row.get("MC", "-"),
             "part_no": row.get("Part No", "-"),
@@ -587,6 +605,7 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
             # Time fields - use summarized columns with proper fallbacks
             "plan": row.get("Plan", "00:00"),
             "utility": row.get("Utility", "00:00"),  # U : Utility - the actual running time
+            "rt": row.get("Utility", "00:00"),  # Keep rt for backward compatibility
             "tp": row.get("TP", "00:00"),
             "ts": row.get("TS", "00:00"),
             "qc": row.get("QC", "00:00"),
@@ -643,6 +662,7 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
         print(f"Sample formatted response row:")
         sample_response = detail_rows[0]
         print(f"  plan: {sample_response['plan']}")
+        print(f"  utility: {sample_response['utility']}")
         print(f"  rt: {sample_response['rt']}")
         print(f"  target_qty: {sample_response['target_qty']}")
         print(f"  per: {sample_response['per']}")
@@ -730,6 +750,23 @@ def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> 
         .reset_index()
     )
 
+    # Capture the last activity per grouped grain for status derivation
+    last_rows = (
+        split_df.sort_values(["_StopTs", "_StartTs"])
+        .groupby(base_keys, dropna=False)
+        .tail(1)
+        [base_keys + ["Desc", "_StartTs", "_StopTs", "Operator"]]
+        .rename(columns={
+            "Desc": "Last Desc",
+            "_StartTs": "Last StartTs",
+            "_StopTs": "Last StopTs",
+            "Operator": "Last Operator",
+        })
+    )
+
+    # Merge last activity info back to grouped data
+    grouped = grouped.merge(last_rows, on=base_keys, how="left")
+
     # TODO: Choose contextual vs plain Keterangan (temporarily disabled)
     # if category_value == "mesin":
     #     if "_OperatorCount" in grouped.columns:
@@ -782,6 +819,9 @@ def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> 
         ("OEE", "OEE Num"),
     ):
         grouped[label] = grouped[num_col].round().astype(int).astype(str) + "%"
+
+    # Derive Status from last activity description
+    grouped["Status"] = grouped["Last Desc"].apply(_status_from_last_desc)
 
     sort_cols = [c for c in ["Tanggal", "Shift", "Operator", "MC", "Part No", "Proses"] if c in grouped.columns]
     grouped = grouped.sort_values(sort_cols).reset_index(drop=True)
