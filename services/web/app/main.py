@@ -303,6 +303,20 @@ def get_dashboard_detail(request: schema.DashboardDetailRequest):
     )
 
 
+@app.post("/api/reports/dashboard/row-history")
+def get_dashboard_row_history(request: schema.RowHistoryRequest):
+    """Get detailed history and calculation breakdown for a specific summary row"""
+    return generate_report.get_row_history(
+        report_type=request.report_type,
+        tanggal=request.tanggal,
+        shift=request.shift,
+        mc=request.mc,
+        part_no=request.part_no,
+        proses=request.proses,
+        operator=request.operator
+    )
+
+
 # ----- LEGACY REPORT APIs (for backward compatibility) ----- #
 @app.post("/report/mesin")
 def get_report(request: schema.ReportRequest):
@@ -458,30 +472,257 @@ def delete_old_data():
 
 @app.get("/mesin-status-all/")
 def get_mesin_status(session=Sessioner):
-    start_log_alias = aliased(models.MesinLog, name="start_log")
+    try:
+        start_log_alias = aliased(models.MesinLog, name="start_log")
 
-    # Get active activities (stop_time_id is None)
-    mesin_status = (
-        session.query(
-            func.to_char(
-                func.timezone("Asia/Jakarta", start_log_alias.timestamp),
-                "YYYY-MM-DD HH24:MI:SS"
-            ).label("Start Time"),
-            models.ActivityMesin.mesin_id.label("Mesin"),
-            models.ActivityMesin.tooling_id.label("Tooling"),
-            models.ActivityMesin.operator_id.label("Operator"),
-            models.ActivityMesin.category.label("Status"),
+        # Get active activities (stop_time_id is None)
+        mesin_status = (
+            session.query(
+                func.to_char(
+                    func.timezone("Asia/Jakarta", start_log_alias.timestamp),
+                    "YYYY-MM-DD HH24:MI:SS"
+                ).label("Start Time"),
+                models.ActivityMesin.mesin_id.label("Mesin"),
+                models.ActivityMesin.tooling_id.label("Tooling"),
+                models.ActivityMesin.operator_id.label("Operator"),
+                models.ActivityMesin.category.label("Status"),
+            )
+            .join(start_log_alias, models.ActivityMesin.start_time_id == start_log_alias.id)
+            .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
+            .filter(models.ActivityMesin.mesin_id.isnot(None))     # Must have a machine
+            .filter(models.ActivityMesin.mesin_id != "")           # Must not be empty string
+            .filter(~models.ActivityMesin.category.startswith("NP"))  # Exclude "No Plan"
+            .order_by(desc(start_log_alias.timestamp))  # Latest active activities first
+            .all()
         )
-        .join(start_log_alias, models.ActivityMesin.start_time_id == start_log_alias.id)
-        .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
-        .filter(models.ActivityMesin.mesin_id.isnot(None))     # Must have a machine
-        .filter(models.ActivityMesin.mesin_id != "")           # Must not be empty string
-        .filter(~models.ActivityMesin.category.startswith("NP"))  # Exclude "No Plan"
-        .order_by(desc(start_log_alias.timestamp))  # Latest active activities first
-        .all()
-    )
 
-    return {"details": mesin_status}
+        print(f"Mesin status query returned {len(mesin_status)} results")
+        return {"details": mesin_status}
+
+    except Exception as e:
+        print(f"Error in get_mesin_status: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Return empty result instead of failing
+        return {"details": [], "error": str(e)}
+
+@app.get("/debug/raw-activities/{date}/{machine}")
+def debug_raw_activities(date: str, machine: str, session=Sessioner):
+    """Debug endpoint to see raw activities for a specific date/machine"""
+    try:
+        # Get all activities for this machine on this date (any shift)
+        activities = session.query(models.ActivityMesin).join(
+            models.MesinLog, models.ActivityMesin.start_time_id == models.MesinLog.id
+        ).filter(
+            models.ActivityMesin.mesin_id == machine,
+            func.date(models.MesinLog.timestamp) == date
+        ).order_by(models.MesinLog.timestamp).all()
+
+        result = []
+        for activity in activities:
+            start_log = session.query(models.MesinLog).get(activity.start_time_id)
+            stop_log = session.query(models.MesinLog).get(activity.stop_time_id) if activity.stop_time_id else None
+
+            result.append({
+                "id": activity.id,
+                "category": activity.category,
+                "mesin_id": activity.mesin_id,
+                "tooling_id": activity.tooling_id,
+                "operator_id": activity.operator_id,
+                "start_time": start_log.timestamp.isoformat() if start_log else None,
+                "stop_time": stop_log.timestamp.isoformat() if stop_log else None,
+                "output": activity.output,
+                "reject": activity.reject,
+                "rework": activity.rework
+            })
+
+        return {
+            "date": date,
+            "machine": machine,
+            "total_activities": len(result),
+            "activities": result
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/debug/fact-activities/{date}/{machine}")
+def debug_fact_activities(date: str, machine: str, session=Sessioner):
+    """Debug endpoint to see ReportActivityFact data for a specific date/machine"""
+    try:
+        # Get all fact records for this machine on this date
+        facts = session.query(models.ReportActivityFact).filter(
+            models.ReportActivityFact.mc_name == machine,
+            func.date(models.ReportActivityFact.tanggal_local) == date
+        ).order_by(models.ReportActivityFact.start_ts_utc).all()
+
+        result = []
+        for fact in facts:
+            result.append({
+                "id": fact.activity_mesin_id,
+                "mc_name": fact.mc_name,
+                "part_no": fact.part_no,
+                "part_name": fact.part_name,
+                "proses": fact.proses,
+                "start_ts_utc": fact.start_ts_utc.isoformat() if fact.start_ts_utc else None,
+                "stop_ts_utc": fact.stop_ts_utc.isoformat() if fact.stop_ts_utc else None,
+                "tanggal_local": str(fact.tanggal_local) if fact.tanggal_local else None,
+                "shift": fact.shift,
+                "category_full": fact.category_full,
+                "qty": fact.qty,
+                "reject": fact.reject,
+                "rework": fact.rework,
+                "keterangan_final": fact.keterangan_final
+            })
+
+        return {
+            "date": date,
+            "machine": machine,
+            "total_facts": len(result),
+            "facts": result
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/debug/shift-assignments/{date}/{machine}")
+def debug_shift_assignments(date: str, machine: str, session=Sessioner):
+    """Debug what shift values are actually stored vs time windows"""
+    try:
+        from datetime import timezone, timedelta
+
+        # Get fact data for this machine/date with their stored shift values
+        facts = session.query(models.ReportActivityFact).filter(
+            models.ReportActivityFact.mc_name == machine,
+            func.date(models.ReportActivityFact.tanggal_local) == date
+        ).order_by(models.ReportActivityFact.start_ts_utc).all()
+
+        result = []
+        for fact in facts:
+            # Convert UTC to Jakarta time for comparison
+            start_jakarta = fact.start_ts_utc.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=7)))
+            stop_jakarta = fact.stop_ts_utc.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=7))) if fact.stop_ts_utc else None
+
+            result.append({
+                "stored_shift": fact.shift,
+                "stored_tanggal": str(fact.tanggal_local),
+                "start_utc": fact.start_ts_utc.isoformat(),
+                "stop_utc": fact.stop_ts_utc.isoformat() if fact.stop_ts_utc else None,
+                "start_jakarta": start_jakarta.strftime("%H:%M:%S"),
+                "stop_jakarta": stop_jakarta.strftime("%H:%M:%S") if stop_jakarta else None,
+                "part_no": fact.part_no,
+                "proses": fact.proses,
+                "category": fact.category_full,
+                "qty": fact.qty
+            })
+
+        # Also show what time windows are calculated for each shift
+        from datetime import datetime
+        date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+
+        shift_windows = {}
+        for shift in ["1", "2", "3"]:
+            from app.cmd.generate_report import _calculate_datetime_range
+            time_from, time_to = _calculate_datetime_range(date_obj, shift, date_obj, shift)
+            shift_windows[f"shift_{shift}"] = {
+                "time_from": time_from.isoformat(),
+                "time_to": time_to.isoformat()
+            }
+
+        return {
+            "date": date,
+            "machine": machine,
+            "total_facts": len(result),
+            "fact_data": result,
+            "calculated_shift_windows": shift_windows
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+    except Exception as e:
+        print(f"Error in get_mesin_status: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Return empty result instead of failing
+        return {"details": [], "error": str(e)}
+
+@app.get("/debug/mesin-status-breakdown")
+def debug_mesin_status(session=Sessioner):
+    """Debug endpoint to understand why /mesin-status-all/ returns no data"""
+
+    # Count total activities
+    total_activities = session.query(models.ActivityMesin).count()
+
+    # Count active activities (stop_time_id is None)
+    active_activities = session.query(models.ActivityMesin).filter(
+        models.ActivityMesin.stop_time_id.is_(None)
+    ).count()
+
+    # Count active activities with machines
+    active_with_mesin = session.query(models.ActivityMesin).filter(
+        models.ActivityMesin.stop_time_id.is_(None),
+        models.ActivityMesin.mesin_id.isnot(None),
+        models.ActivityMesin.mesin_id != ""
+    ).count()
+
+    # Count active non-NP activities with machines
+    active_non_np = session.query(models.ActivityMesin).filter(
+        models.ActivityMesin.stop_time_id.is_(None),
+        models.ActivityMesin.mesin_id.isnot(None),
+        models.ActivityMesin.mesin_id != "",
+        ~models.ActivityMesin.category.startswith("NP")
+    ).count()
+
+    # Get sample data for each stage
+    sample_active = session.query(models.ActivityMesin).filter(
+        models.ActivityMesin.stop_time_id.is_(None)
+    ).limit(3).all()
+
+    sample_with_mesin = session.query(models.ActivityMesin).filter(
+        models.ActivityMesin.stop_time_id.is_(None),
+        models.ActivityMesin.mesin_id.isnot(None),
+        models.ActivityMesin.mesin_id != ""
+    ).limit(3).all()
+
+    # Check for JOIN issues
+    activities_without_start_log = session.query(models.ActivityMesin).filter(
+        models.ActivityMesin.stop_time_id.is_(None),
+        models.ActivityMesin.start_time_id.is_(None)
+    ).count()
+
+    return {
+        "counts": {
+            "total_activities": total_activities,
+            "active_activities": active_activities,
+            "active_with_mesin": active_with_mesin,
+            "active_non_np": active_non_np,
+            "activities_without_start_log": activities_without_start_log
+        },
+        "sample_active": [
+            {
+                "id": a.id,
+                "mesin_id": a.mesin_id,
+                "operator_id": a.operator_id,
+                "category": a.category,
+                "start_time_id": a.start_time_id,
+                "stop_time_id": a.stop_time_id
+            } for a in sample_active
+        ],
+        "sample_with_mesin": [
+            {
+                "id": a.id,
+                "mesin_id": a.mesin_id,
+                "operator_id": a.operator_id,
+                "category": a.category,
+                "start_time_id": a.start_time_id
+            } for a in sample_with_mesin
+        ]
+    }
 
 # ----- READ APIs ----- #
 # ----- TIMESTAMP API for Cache Validation ----- #

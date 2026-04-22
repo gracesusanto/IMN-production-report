@@ -214,3 +214,55 @@ class ReportBackfillRequest(BaseModel):
     date_from: date
     date_to: date
     batch_size: int = 2000
+
+
+# Row History Schemas
+class RowHistoryRequest(BaseModel):
+    """Request for row history - matches summary row grain"""
+    report_type: str  # "mesin" or "operator"
+    tanggal: str
+    shift: str
+    mc: str
+    part_no: str
+    proses: str
+    operator: Optional[str] = None  # Required for operator reports
+
+
+class TimelineActivity(BaseModel):
+    """Individual activity in the timeline"""
+    start_time: str
+    stop_time: str
+    desc: str
+    duration_minutes: float
+    qty: int
+    reject: int
+    rework: int
+    operator: str
+    mc: str
+    part_no: str
+    proses: str
+    keterangan: str
+
+
+class CalculationBreakdown(BaseModel):
+    """KPI calculation breakdown"""
+    plan_minutes: float
+    utility_minutes: float
+    downtime_minutes: float
+    target_per_jam: int
+    target_qty: int
+    per_formula: str
+    otr_formula: str
+    qr_formula: str
+    oee_formula: str
+    per_num: float
+    otr_num: float
+    qr_num: float
+    oee_num: float
+
+
+class RowHistoryResponse(BaseModel):
+    """Response containing summary, timeline, and calculation"""
+    summary: Dict[str, Any]
+    timeline: List[TimelineActivity]
+    calculation: CalculationBreakdown

@@ -485,6 +485,20 @@ def _convert_rows_to_api_format(df: pd.DataFrame, report_category: Any) -> list:
         if "Common Tooling Name" in row:
             api_row["common_tooling_name"] = row.get("Common Tooling Name", "-")
 
+        # Add history_key for row lineage (similar to detail response)
+        history_key = {
+            "report_type": category_value,
+            "tanggal": str(row.get("Tanggal", "")),
+            "shift": str(row.get("Shift", "")),
+            "mc": row.get("MC", "-"),
+            "part_no": row.get("Part No", "-"),
+            "proses": row.get("Proses", "-"),
+        }
+        if category_value == "operator":
+            history_key["operator"] = row.get("Operator", "-")
+
+        api_row["history_key"] = history_key
+
         rows.append(api_row)
 
     return rows
@@ -506,11 +520,27 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
         target_per_jam = int(row.get("Target", 0))
         target_qty = int(row.get("Target Qty", 0)) if "Target Qty" in row and row.get("Target Qty") else target_per_jam
 
+        # Build history_key for row lineage
+        history_key = {
+            "report_type": str(report_category).split(".")[-1].lower(),  # Extract "mesin" or "operator" from ReportCategory
+            "tanggal": str(row.get("Tanggal", "")),
+            "shift": str(row.get("Shift", "")),
+            "mc": row.get("MC", "-"),
+            "part_no": row.get("Part No", "-"),
+            "proses": row.get("Proses", "-")
+        }
+
+        # Add operator for operator reports
+        if str(report_category).split(".")[-1].lower() == "operator":
+            history_key["operator"] = row.get("Operator", "-")
+
         detail_row = {
             # Excel column order exactly
             "status": _derive_status_from_row(row),
             "operator": row.get("Operator", "-"),
             "mc_no": row.get("MC", "-"),
+            "part_no": row.get("Part No", "-"),
+            "part_name": row.get("Part Name", "-"),
             "part_no_name": f"{row.get('Part No', '-')} {row.get('Part Name', '-')}".strip(),
             "proses": row.get("Proses", "-"),
             "target_per_jam": target_per_jam,
@@ -536,14 +566,21 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
             # Use summarized Keterangan, not raw transition text
             "catatan": row.get("Keterangan", ""),
 
-            # KPI fields - use summarized percentages
+            # KPI fields - both percentage strings and numeric values
             "per": row.get("PER", "0%"),
+            "per_num": float(row.get("PER Num", 0)),
             "otr": row.get("OTR", "0%"),
+            "otr_num": float(row.get("OTR Num", 0)),
             "qr": row.get("QR", "0%"),
+            "qr_num": float(row.get("QR Num", 0)),
             "oee": row.get("OEE", "0%"),
+            "oee_num": float(row.get("OEE Num", 0)),
 
             "tanggal": str(row.get("Tanggal", "")),
-            "shift": str(row.get("Shift", ""))
+            "shift": str(row.get("Shift", "")),
+
+            # Row history lineage key
+            "history_key": history_key
         }
         detail_rows.append(detail_row)
 

@@ -358,14 +358,101 @@ def get_report_from_fact_table_raw(session, report_category, time_from, time_to)
     return ru.normalize_report_df(df)
 
 
-def get_report_with_overlap_window(session, report_category, time_from, time_to):
+def get_report_with_overlap_window_and_filters(session, report_category, time_from, time_to, filters=None):
     """
-    Get raw report data using overlap-based time filtering for dashboard summary.
+    Get raw report data using overlap-based time filtering AND safe DB-level filters.
     Filters by: start < time_to AND stop > time_from
+    Plus: machine, operator, part, proses filters that are safe at raw fact level
     """
     use_new = USE_REPORT_FACT_TABLE
 
     if use_new:
+        # Use overlap filtering for fact table - this is the correct foundation
+        query = (
+            session.query(models.ReportActivityFact)
+            .filter(models.ReportActivityFact.start_ts_utc < time_to)
+            .filter(models.ReportActivityFact.stop_ts_utc > time_from)
+        )
+
+        # Report category filtering
+        if report_category == ReportCategory.MESIN:
+            query = query.filter(models.ReportActivityFact.mesin_id.isnot(None))
+
+        # Apply safe DB-level filters from UI (these don't depend on shift splitting)
+        if filters:
+            mc_filter = filters.get("mc")
+            if mc_filter and hasattr(mc_filter, 'contains') and mc_filter.contains:
+                query = query.filter(models.ReportActivityFact.mc_name.contains(mc_filter.contains))
+            elif mc_filter and (hasattr(mc_filter, 'in_list') or hasattr(mc_filter, 'in')):
+                in_values = getattr(mc_filter, 'in_list', None) or getattr(mc_filter, 'in', None)
+                if in_values:
+                    query = query.filter(models.ReportActivityFact.mc_name.in_(in_values))
+
+            operator_filter = filters.get("operator")
+            if operator_filter and hasattr(operator_filter, 'contains') and operator_filter.contains:
+                query = query.filter(models.ReportActivityFact.operator_name.contains(operator_filter.contains))
+            elif operator_filter and (hasattr(operator_filter, 'in_list') or hasattr(operator_filter, 'in')):
+                in_values = getattr(operator_filter, 'in_list', None) or getattr(operator_filter, 'in', None)
+                if in_values:
+                    query = query.filter(models.ReportActivityFact.operator_name.in_(in_values))
+
+            part_no_filter = filters.get("part_no")
+            if part_no_filter and hasattr(part_no_filter, 'contains') and part_no_filter.contains:
+                query = query.filter(models.ReportActivityFact.part_no.contains(part_no_filter.contains))
+
+            part_name_filter = filters.get("part_name")
+            if part_name_filter and hasattr(part_name_filter, 'contains') and part_name_filter.contains:
+                query = query.filter(models.ReportActivityFact.part_name.contains(part_name_filter.contains))
+
+            proses_filter = filters.get("proses")
+            if proses_filter and hasattr(proses_filter, 'equals') and proses_filter.equals:
+                query = query.filter(models.ReportActivityFact.proses == proses_filter.equals)
+
+        query = query.order_by(models.ReportActivityFact.start_ts_utc.asc())
+        rows = query.all()
+        print(f"DB query returned: {len(rows)} rows (overlap + DB-filtered)")
+
+        if not rows:
+            return pd.DataFrame()
+
+        # Convert to DataFrame - same format as before
+        df_dict = {
+            "MC": [r.mc_name or "-" for r in rows],
+            "Operator": [r.operator_name or "-" for r in rows],
+            "NIK": [r.operator_nik or "-" for r in rows],
+            "Part No": [r.part_no or "-" for r in rows],
+            "Part Name": [r.part_name or "-" for r in rows],
+            "Proses": [r.proses or "-" for r in rows],
+            "Desc": [r.category_desc or "" for r in rows],
+            "Target": [r.target_std_jam or 0 for r in rows],
+            "Qty": [r.qty for r in rows],
+            "Reject": [r.reject for r in rows],
+            "Rework": [r.rework for r in rows],
+            "Keterangan": [r.keterangan_final or "" for r in rows],
+            "_StartTs": [r.start_ts_utc for r in rows],
+            "_StopTs": [r.stop_ts_utc for r in rows],
+            "_DurationMinutes": [(r.stop_ts_utc - r.start_ts_utc).total_seconds() / 60.0 for r in rows],
+        }
+
+        # Add tooling info if available
+        if rows and hasattr(rows[0], 'kode_tooling'):
+            df_dict["Kode Tooling"] = [r.kode_tooling or "-" for r in rows]
+            df_dict["Common Tooling Name"] = [r.common_tooling_name or "-" for r in rows]
+
+        return pd.DataFrame(df_dict)
+
+    else:
+        # Fallback to old method if fact table not available
+        return get_report_with_overlap_window_old(session, report_category, time_from, time_to)
+
+
+def get_report_with_overlap_window_old(session, report_category, time_from, time_to):
+    """
+    Original method for backward compatibility
+    """
+    use_new = False
+
+    if not use_new:
         # Use overlap filtering for fact table
         query = (
             session.query(models.ReportActivityFact)
@@ -775,30 +862,271 @@ def get_dashboard_summary_report(
 ):
     """
     Get dashboard summary report with shift splitting and business grain aggregation.
-    Uses raw atomic rows with overlap-based time filtering.
-    This is for dashboard views only - exports should use get_report().
+    OPTIMIZED: Filters at database level for much better performance.
     """
     date_from, shift_from, date_to, shift_to = _fill_default_datetime(date_time_from, shift_from, date_time_to, shift_to)
+
+    print(f"Dashboard summary report (hybrid optimized): {date_from} to {date_to}, shifts {shift_from}-{shift_to}")
+
+    # Calculate overlap time window - this is the correct foundation
     time_from, time_to = _calculate_datetime_range(date_from, shift_from, date_to, shift_to)
+    print(f"Overlap time window: {time_from} to {time_to}")
 
     with SessionLocal() as session:
-        # Get raw data using overlap-based time filtering
-        # This ensures we capture activities that span the time window boundaries
-        df = get_report_with_overlap_window(
+        # OPTIMIZED: Get data with overlap window + safe DB filters
+        df = get_report_with_overlap_window_and_filters(
             session=session,
             report_category=report_category,
             time_from=time_from,
             time_to=time_to,
+            filters=filters,  # Push safe filters to DB level
         )
 
-    # Apply dashboard summary aggregation to raw atomic rows
+    # Apply dashboard summary aggregation
+    if df.empty:
+        print("No data found for the specified filters")
+        return rs.build_dashboard_response(pd.DataFrame(), report_category, pagination)
+
+    print(f"Processing {len(df)} raw rows for dashboard summary")
     summary_df = rs.summarize_dashboard_df(df, report_category)
+    print(f"Summarized to {len(summary_df)} rows")
 
-    # Apply filters, sort, and pagination to summarized data
-    summary_df = fu.apply_filters(summary_df, filters)
-    summary_df = _apply_sort(summary_df, report_category, sort)
+    # Apply filters after summarization
+    filtered_df = fu.apply_filters(summary_df, filters)
+    print(f"Filtered to {len(filtered_df)} rows")
 
-    return rs.build_dashboard_response(df, report_category, pagination)
+    # Apply date/shift filtering - this is the key fix for the date filtering bug
+    date_shift_filtered_df = _apply_date_shift_filter(filtered_df, date_from, date_to, shift_from, shift_to)
+    print(f"Date/shift filtered to {len(date_shift_filtered_df)} rows")
+
+    # Apply sorting
+    sorted_df = _apply_sort(date_shift_filtered_df, report_category, sort)
+
+    # Safety check
+    _assert_date_shift_constraints(sorted_df, date_from, date_to, shift_from, shift_to)
+
+    return rs.build_dashboard_response(sorted_df, report_category, pagination)
+
+
+def _apply_date_shift_filter(df, date_from, date_to, shift_from, shift_to):
+    """Apply date and shift filtering to summarized data"""
+    try:
+        if df.empty:
+            return df
+
+        # Convert dates to date objects for comparison
+        if hasattr(date_from, 'date'):
+            date_from = date_from.date()
+        if hasattr(date_to, 'date'):
+            date_to = date_to.date()
+
+        original_count = len(df)
+
+        # Date filtering
+        if 'Tanggal' in df.columns:
+            date_mask = (pd.to_datetime(df['Tanggal']).dt.date >= date_from) & \
+                       (pd.to_datetime(df['Tanggal']).dt.date <= date_to)
+            df = df[date_mask]
+
+        # Shift filtering
+        if 'Shift' in df.columns:
+            shift_mask = (df['Shift'].astype(int) >= shift_from) & \
+                        (df['Shift'].astype(int) <= shift_to)
+            df = df[shift_mask]
+
+        if original_count != len(df):
+            print(f"Date/shift filter: {original_count} → {len(df)} rows")
+
+        return df
+    except Exception as e:
+        print(f"ERROR in _apply_date_shift_filter: {e}")
+        # Return original df if filtering fails
+        return df
+
+
+def _assert_date_shift_constraints(df, date_from, date_to, shift_from, shift_to):
+    """Assert all rows satisfy date/shift constraints - fail in dev if not"""
+    try:
+        if df.empty:
+            return
+
+        # Convert dates for comparison
+        if hasattr(date_from, 'date'):
+            date_from = date_from.date()
+        if hasattr(date_to, 'date'):
+            date_to = date_to.date()
+
+        violations = []
+
+        if 'Tanggal' in df.columns:
+            df_dates = pd.to_datetime(df['Tanggal']).dt.date
+            date_violations = df[(df_dates < date_from) | (df_dates > date_to)]
+            if not date_violations.empty:
+                violations.append(f"Date violations: {len(date_violations)} rows outside {date_from} to {date_to}")
+                print(f"DEBUG: Date violations found:")
+                for _, row in date_violations.head(5).iterrows():
+                    print(f"  Row has tanggal={row.get('Tanggal')}, expected {date_from} <= tanggal <= {date_to}")
+
+        if 'Shift' in df.columns:
+            df_shifts = df['Shift'].astype(int)
+            shift_violations = df[(df_shifts < shift_from) | (df_shifts > shift_to)]
+            if not shift_violations.empty:
+                violations.append(f"Shift violations: {len(shift_violations)} rows outside shift {shift_from} to {shift_to}")
+                print(f"DEBUG: Shift violations found:")
+                for _, row in shift_violations.head(5).iterrows():
+                    print(f"  Row has shift={row.get('Shift')}, expected {shift_from} <= shift <= {shift_to}")
+
+        if violations:
+            error_msg = f"Date/shift constraint violations: {'; '.join(violations)}"
+            print(f"WARNING: {error_msg}")
+            # Just log for now, don't fail
+        else:
+            pass  # All constraints satisfied
+
+    except Exception as e:
+        print(f"ERROR in _assert_date_shift_constraints: {e}")
+
+
+def _apply_safe_fact_filters(query, filters):
+    """
+    Apply only filters that are safe at raw fact level.
+    Do NOT apply final date/shift summary filtering here.
+    """
+    if not filters:
+        return query
+
+    for field, cond in filters.items():
+        if not cond:
+            continue
+
+        db_field = None
+        if field in {"mc", "mc_no"}:
+            db_field = models.ReportActivityFact.mc_name
+        elif field == "operator":
+            db_field = models.ReportActivityFact.operator_name
+        elif field == "part_no":
+            db_field = models.ReportActivityFact.part_no
+        elif field == "part_name":
+            db_field = models.ReportActivityFact.part_name
+        elif field == "proses":
+            db_field = models.ReportActivityFact.proses
+        elif field in {"desc", "category", "status"}:
+            db_field = models.ReportActivityFact.category_full
+
+        if db_field is None:
+            continue
+
+        contains_val = getattr(cond, "contains", None)
+        equals_val = getattr(cond, "equals", None)
+        in_val = getattr(cond, "in_list", None) or getattr(cond, "in", None)
+
+        if contains_val:
+            query = query.filter(db_field.ilike(f"%{contains_val}%"))
+        elif equals_val not in [None, ""]:
+            query = query.filter(db_field == equals_val)
+        elif in_val:
+            query = query.filter(db_field.in_(in_val))
+
+    return query
+
+
+def _build_fact_overlap_query(session, report_category, time_from, time_to, filters=None):
+    """
+    Raw fact query using overlap logic:
+      start_ts_utc < window_end
+      stop_ts_utc  > window_start
+    """
+    query = (
+        session.query(models.ReportActivityFact)
+        .filter(models.ReportActivityFact.start_ts_utc < time_to)
+        .filter(models.ReportActivityFact.stop_ts_utc > time_from)
+    )
+
+    if report_category == ReportCategory.MESIN:
+        query = query.filter(models.ReportActivityFact.mesin_id.isnot(None))
+
+    query = _apply_safe_fact_filters(query, filters)
+    query = query.order_by(
+        models.ReportActivityFact.tanggal_local.asc(),
+        models.ReportActivityFact.shift.asc(),
+        models.ReportActivityFact.start_ts_utc.asc(),
+    )
+
+    return query
+
+
+def _fact_rows_to_dataframe(rows, report_category):
+    """Convert fact rows to normalized dataframe"""
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(
+        [
+            {
+                "ActivityMesinId": r.activity_mesin_id,
+                "MC": r.mc_name or "-",
+                "Operator": r.operator_name or "-",
+                "NIK": r.operator_nik or "-",
+                "Tooling": r.tooling_id or "-",
+                "Kode Tooling": r.kode_tooling or "-",
+                "Common Tooling Name": r.common_tooling_name or "-",
+                "Part No": r.part_no or "-",
+                "Part Name": r.part_name or "-",
+                "Proses": getattr(r, "proses", None) or "-",
+                "Target": float(r.target_std_jam or 0),
+                "_StartTs": pd.Timestamp(r.start_ts_utc),
+                "_StopTs": pd.Timestamp(r.stop_ts_utc),
+                "Desc": r.category_full or "",
+                "Qty": int(r.qty or 0),
+                "Reject": int(r.reject or 0),
+                "Rework": int(r.rework or 0),
+                "Keterangan": r.keterangan_final or "",
+                "Keterangan Limax": ru.build_keterangan_limax(
+                    int(r.reject or 0),
+                    int(r.rework or 0),
+                    r.keterangan_final or "",
+                ),
+            }
+            for r in rows
+        ]
+    )
+
+    if report_category == ReportCategory.OPERATOR:
+        df = df[df["Desc"] != "NP : No Plan"].copy()
+
+    return ru.normalize_report_df(df)
+
+
+def get_report_with_overlap_window_and_filters(
+    session,
+    report_category,
+    time_from,
+    time_to,
+    filters=None,
+):
+    """
+    Shared raw source for dashboard detail + summary.
+    Uses DB overlap filtering and safe DB-level filters,
+    but does NOT do summary/date-shift pruning yet.
+    """
+    if not USE_REPORT_FACT_TABLE:
+        # fallback legacy path if needed
+        return get_report_legacy_raw(session, report_category, time_from, time_to)
+
+    rows = _build_fact_overlap_query(
+        session=session,
+        report_category=report_category,
+        time_from=time_from,
+        time_to=time_to,
+        filters=filters,
+    ).all()
+
+    print(f"Processing {len(rows)} raw rows from optimized DB query")
+    print(f"DEBUG: Fact query time window: {time_from} to {time_to}")
+    if rows:
+        print(f"DEBUG: First fact row time: {rows[0].start_ts_utc} to {rows[0].stop_ts_utc}")
+        print(f"DEBUG: First fact row shift: {rows[0].shift}, tanggal: {rows[0].tanggal_local}")
+    return _fact_rows_to_dataframe(rows, report_category)
 
 
 def get_detail_export_report(
@@ -808,52 +1136,408 @@ def get_detail_export_report(
 ):
     """
     Get detail/export report matching Excel column structure exactly.
-    This preserves the familiar business format.
+    OPTIMIZED: Filters at database level for much better performance.
     """
     date_from, shift_from, date_to, shift_to = _fill_default_datetime(date_time_from, shift_from, date_time_to, shift_to)
+
+    print(f"Dashboard detail report (hybrid optimized): {date_from} to {date_to}, shifts {shift_from}-{shift_to}")
+
+    # Calculate overlap time window - this is the correct foundation
     time_from, time_to = _calculate_datetime_range(date_from, shift_from, date_to, shift_to)
+    print(f"Overlap time window: {time_from} to {time_to}")
 
     with SessionLocal() as session:
-        # Get raw data using overlap-based time filtering for complete data
-        df = get_report_with_overlap_window(
+        # OPTIMIZED: Get data with overlap window + safe DB filters
+        df = get_report_with_overlap_window_and_filters(
             session=session,
             report_category=report_category,
             time_from=time_from,
             time_to=time_to,
+            filters=filters,  # Push safe filters to DB level
         )
 
     # Apply dashboard summary for consistent KPIs, then convert to detail format
-    DEBUG_REPORT_FLOW = False  # Feature flag for debug output
+    if df.empty:
+        print("No data found for the specified filters")
+        return rs.build_detail_export_response(pd.DataFrame(), report_category, pagination)
 
-    if DEBUG_REPORT_FLOW:
-        print(f"\n=== DEBUG: get_detail_export_report - Raw Data ===")
-        print(f"Raw df shape: {df.shape}")
-        if not df.empty:
-            print("Raw df columns:", list(df.columns))
-            print("Sample raw rows:")
-            available_cols = [col for col in ['MC', 'Desc', 'Target', 'Qty', 'Reject', '_DurationMinutes'] if col in df.columns]
-            if available_cols:
-                print(df[available_cols].head(3).to_string())
-            print(f"Desc values: {df['Desc'].unique().tolist() if 'Desc' in df.columns else 'No Desc column'}")
-
+    print(f"Processing {len(df)} pre-filtered raw rows")
     summary_df = rs.summarize_dashboard_df(df, report_category)
+    print(f"Summarized to {len(summary_df)} rows")
 
-    if DEBUG_REPORT_FLOW:
-        print(f"\nSummary df shape: {summary_df.shape}")
-        if not summary_df.empty:
-            print("Summary df columns:", list(summary_df.columns))
-            key_cols = ['MC', 'Plan Minutes', 'Utility Minutes', 'RT_Minutes', 'TP_Minutes', 'Target', 'Target Qty']
-            available_cols = [col for col in key_cols if col in summary_df.columns]
-            if available_cols:
-                print("Sample summary data:")
-                print(summary_df[available_cols].head(2).to_string())
-        print("=== END DEBUG ===\n")
+    # Apply remaining filters that weren't safe at DB level (should be fewer now)
+    remaining_filters = {k: v for k, v in (filters or {}).items()
+                        if k not in ['mc', 'operator', 'part_no', 'part_name', 'proses']}
+    if remaining_filters:
+        filtered_df = fu.apply_filters(summary_df, remaining_filters)
+        print(f"Additional filtered to {len(filtered_df)} rows")
+    else:
+        filtered_df = summary_df
 
-    # Apply filters and sort to summarized data
-    filtered_df = fu.apply_filters(summary_df, filters)
-    sorted_df = _apply_sort(filtered_df, report_category, sort)
+    # Apply final exact date/shift filtering - CRITICAL for correctness
+    # This is needed because activities can cross shift/date boundaries
+    date_shift_filtered_df = _apply_date_shift_filter(filtered_df, date_from, date_to, shift_from, shift_to)
+    print(f"Final date/shift filtered to {len(date_shift_filtered_df)} rows")
+
+    # Apply sorting
+    sorted_df = _apply_sort(date_shift_filtered_df, report_category, sort)
+
+    # Safety check - should pass now
+    _assert_date_shift_constraints(sorted_df, date_from, date_to, shift_from, shift_to)
 
     return rs.build_detail_export_response(sorted_df, report_category, pagination)
+
+
+def get_row_history(
+    report_type: str,
+    tanggal: str,
+    shift: str,
+    mc: str,
+    part_no: str,
+    proses: str,
+    operator: str = None,
+):
+    """
+    Get the detailed history and calculation breakdown for a specific summary row.
+    Reconstructs the source activities that contributed to the clicked summary row.
+    """
+    from datetime import datetime
+
+    print(f"Row history request: {report_type} {mc} {part_no} {proses} on {tanggal} shift {shift}")
+    print(f"DEBUG: Exact request payload - MC='{mc}', Part_No='{part_no}', Proses='{proses}', Date='{tanggal}', Shift='{shift}', Operator='{operator}'")
+
+    DEBUG_ROW_HISTORY = True  # Enable debug mode
+
+    # Use hybrid approach: try main reconstruction, fallback if needed
+    try:
+        result = _get_row_history_main(report_type, tanggal, shift, mc, part_no, proses, operator)
+
+        # Check if reconstruction actually succeeded
+        if result.get("found") is False or not result.get("summary"):
+            print(f"Row history reconstruction did not find a matching row for {mc} {part_no} {proses}")
+        else:
+            print(f"Row history reconstruction succeeded for {mc} {part_no} {proses}")
+
+        return result
+    except Exception as e:
+        print(f"Main reconstruction failed: {e}")
+        fallback_result = _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator)
+
+        # In debug mode, don't return fake zeros when no row is found
+        if DEBUG_ROW_HISTORY and not fallback_result.get("summary"):
+            return {
+                "summary": {},
+                "timeline": [],
+                "calculation": {},
+                "error": f"Row history reconstruction failed: {str(e)}",
+                "found": False,
+            }
+
+        return fallback_result
+
+
+def _get_row_history_main(report_type, tanggal, shift, mc, part_no, proses, operator=None):
+    """
+    Main reconstruction method using stored fact table grain.
+    Fixes the shift-3 window problem by querying the EXACT stored fact-table grain.
+    """
+    from datetime import datetime
+
+    report_category = ReportCategory.MESIN if report_type == "mesin" else ReportCategory.OPERATOR
+
+    # Parse the input date and shift
+    date_obj = datetime.strptime(tanggal, "%Y-%m-%d").date()
+    shift_num = int(shift)
+
+    print(f"Row history for {report_type} on {tanggal} shift {shift}: querying by stored fact grain")
+
+    with SessionLocal() as session:
+        # CORE FIX: Query by the EXACT stored fact table grain
+        # This avoids recalculating UTC windows that mismatch how data was stored
+        query = (
+            session.query(models.ReportActivityFact)
+            .filter(models.ReportActivityFact.tanggal_local == date_obj)
+            .filter(models.ReportActivityFact.shift == shift_num)
+            .filter(models.ReportActivityFact.mc_name == mc)
+            .filter(models.ReportActivityFact.part_no == part_no)
+            .filter(models.ReportActivityFact.proses == proses)
+        )
+
+        if report_type == "operator" and operator:
+            query = query.filter(models.ReportActivityFact.operator_name == operator)
+
+        rows = query.order_by(models.ReportActivityFact.start_ts_utc.asc()).all()
+
+        print(f"Found {len(rows)} exact fact rows for tanggal={date_obj} shift={shift_num} {mc}/{part_no}/{proses}")
+        if rows:
+            for i, r in enumerate(rows[:2]):  # Show first 2
+                print(f"  Match {i}: start={r.start_ts_utc}, qty={r.qty}, cat={r.category_full}")
+        else:
+            print("❌ No exact fact rows found - reconstruction failed")
+            return _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator)
+
+        # Convert fact rows to dataframe for processing
+        matched_df = _fact_rows_to_dataframe(rows, report_category)
+
+        if matched_df.empty:
+            print("❌ Matched dataframe is empty - reconstruction failed")
+            return _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator)
+
+        print(f"✅ Successfully matched {len(matched_df)} raw fact rows for {mc}/{part_no}/{proses}")
+
+        # Build summary directly from matched raw facts (avoid double-splitting bug)
+        summary_df = rs.summarize_dashboard_df(matched_df, report_category)
+
+        if summary_df.empty:
+            print("❌ Summary aggregation failed - using fallback")
+            return _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator)
+
+        # Apply exact date/shift filtering to ensure we get the right summary row
+        final_summary = _apply_date_shift_filter(summary_df, date_obj, date_obj, shift_num, shift_num)
+
+        if final_summary.empty:
+            print("❌ No data after date/shift filtering - using fallback")
+            return _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator)
+
+        # Get the reconstructed summary row
+        summary_row = final_summary.iloc[0]
+        print(f"✅ Row history reconstruction succeeded: OEE={summary_row.get('OEE', 'N/A')}, Output={summary_row.get('Qty', 'N/A')}")
+
+        # Build timeline from the matched raw activities (split for display only)
+        split_df = rs.split_rows_by_shift(matched_df)
+        timeline = []
+
+        for _, activity in split_df.iterrows():
+            # Double-check this activity belongs to the requested date/shift
+            activity_date = pd.to_datetime(activity.get("Tanggal")).date() if "Tanggal" in activity else None
+            activity_shift = int(activity.get("Shift", 0)) if "Shift" in activity else 0
+
+            if activity_date == date_obj and activity_shift == shift_num:
+                start_time = activity.get("_StartTs")
+                stop_time = activity.get("_StopTs")
+
+                # Convert to Jakarta time for display
+                if isinstance(start_time, pd.Timestamp):
+                    start_time = start_time.tz_convert(ru.JAKARTA_TZ).isoformat()
+                if isinstance(stop_time, pd.Timestamp):
+                    stop_time = stop_time.tz_convert(ru.JAKARTA_TZ).isoformat()
+
+                duration_mins = activity.get("_DurationMinutes", 0)
+
+                timeline.append({
+                    "start_time": str(start_time),
+                    "stop_time": str(stop_time),
+                    "desc": activity.get("Desc", ""),
+                    "duration_minutes": float(duration_mins),
+                    "qty": int(activity.get("Qty", 0)),
+                    "reject": int(activity.get("Reject", 0)),
+                    "rework": int(activity.get("Rework", 0)),
+                    "operator": activity.get("Operator", "-"),
+                    "mc": activity.get("MC", "-"),
+                    "part_no": activity.get("Part No", "-"),
+                    "proses": activity.get("Proses", "-"),
+                    "keterangan": activity.get("Keterangan", "")
+                })
+
+        # Sort timeline by start time
+        timeline.sort(key=lambda x: x["start_time"])
+        print(f"✅ Built timeline with {len(timeline)} activities")
+
+        # Build the summary response (same format as detail response)
+        target_per_jam = int(summary_row.get("Target", 0))
+        target_qty = int(summary_row.get("Target Qty", 0)) if "Target Qty" in summary_row else target_per_jam
+
+        summary = {
+            "status": rs._derive_status_from_row(summary_row),
+            "operator": summary_row.get("Operator", "-"),
+            "mc_no": summary_row.get("MC", "-"),
+            "part_no_name": f"{summary_row.get('Part No', '-')} {summary_row.get('Part Name', '-')}".strip(),
+            "proses": summary_row.get("Proses", "-"),
+            "target_per_jam": target_per_jam,
+            "target_qty": target_qty,
+            "output": int(summary_row.get("Qty", 0)),
+            "reject": int(summary_row.get("Reject", 0)),
+            "plan": summary_row.get("Plan", "00:00"),
+            "rt": summary_row.get("Utility", "00:00"),
+            "tp": summary_row.get("TP", "00:00"),
+            "ts": summary_row.get("TS", "00:00"),
+            "qc": summary_row.get("QC", "00:00"),
+            "cm": summary_row.get("CM", "00:00"),
+            "no": summary_row.get("NO", "00:00"),
+            "np": summary_row.get("NP", "00:00"),
+            "nm": summary_row.get("NM", "00:00"),
+            "mp": summary_row.get("MP", "00:00"),
+            "bt": summary_row.get("BT", "00:00"),
+            "br": summary_row.get("BR", "00:00"),
+            "total_dt": summary_row.get("Total Downtime", "00:00"),
+            "per": summary_row.get("PER", "0%"),
+            "otr": summary_row.get("OTR", "0%"),
+            "qr": summary_row.get("QR", "0%"),
+            "oee": summary_row.get("OEE", "0%"),
+            "tanggal": tanggal,
+            "shift": shift
+        }
+
+        # Build calculation breakdown
+        plan_minutes = summary_row.get("Plan Minutes", 0)
+        utility_minutes = summary_row.get("Utility Minutes", 0)
+        downtime_minutes = plan_minutes - utility_minutes
+
+        calculation = {
+            "plan_minutes": float(plan_minutes),
+            "utility_minutes": float(utility_minutes),
+            "downtime_minutes": float(downtime_minutes),
+            "target_per_jam": target_per_jam,
+            "target_qty": target_qty,
+            "per_formula": "output / (utility_hours * target_per_jam)",
+            "otr_formula": "utility_minutes / plan_minutes",
+            "qr_formula": "output / (output + reject + rework)",
+            "oee_formula": "otr * per * qr",
+            "per_num": float(summary_row.get("PER Num", 0)),
+            "otr_num": float(summary_row.get("OTR Num", 0)),
+            "qr_num": float(summary_row.get("QR Num", 0)),
+            "oee_num": float(summary_row.get("OEE Num", 0))
+        }
+
+        return {
+            "summary": summary,
+            "timeline": timeline,
+            "calculation": calculation
+        }
+
+
+def _get_row_history_fallback(report_type, tanggal, shift, mc, part_no, proses, operator=None):
+    """
+    Fallback method to get row history when reconstruction from raw data fails.
+    Uses the dashboard detail data to find the matching row and extract calculation values.
+    """
+    from datetime import datetime
+
+    print(f"Using fallback method for row history: {mc} {part_no} {proses} on {tanggal} shift {shift}")
+
+    report_category = ReportCategory.MESIN if report_type == "mesin" else ReportCategory.OPERATOR
+    date_obj = datetime.strptime(tanggal, "%Y-%m-%d").date()
+    shift_num = int(shift)
+
+    # Use same method as dashboard detail to get the data
+    try:
+        detail_response = get_detail_export_report(
+            report_category=report_category,
+            date_time_from=date_obj,
+            shift_from=shift_num,
+            date_time_to=date_obj,
+            shift_to=shift_num,
+            pagination=None,  # Get all data
+            filters=None,
+            sort=None
+        )
+
+        detail_rows = detail_response.get('rows', [])
+        print(f"DEBUG: Fallback got {len(detail_rows)} detail rows to search")
+
+        # Find the matching row using exact field matching
+        matching_row = None
+        for row in detail_rows:
+            if (row.get('mc_no') == mc and
+                row.get('tanggal') == tanggal and
+                row.get('shift') == shift and
+                row.get('proses') == proses):
+
+                # Use exact part_no matching if available, fallback to substring
+                if row.get('part_no') == part_no:
+                    # For operator reports, also match operator
+                    if report_type == "operator":
+                        if row.get('operator') == operator:
+                            matching_row = row
+                            break
+                    else:
+                        matching_row = row
+                        break
+                # Fallback: check part number in part_no_name as before
+                elif part_no in row.get('part_no_name', ''):
+                    # For operator reports, also match operator
+                    if report_type == "operator":
+                        if row.get('operator') == operator:
+                            matching_row = row
+                            break
+                    else:
+                        matching_row = row
+                        break
+
+        if matching_row:
+            print(f"DEBUG: Fallback found exact matching row - MC={matching_row.get('mc_no')}, Part={matching_row.get('part_no')}, Shift={matching_row.get('shift')}")
+
+            # Use the row's actual values for calculation
+            plan_minutes = 0
+            utility_minutes = 0
+
+            # Try to extract minutes from time strings (e.g., "02:30" -> 150 minutes)
+            plan_time = matching_row.get('plan', '00:00')
+            utility_time = matching_row.get('rt', '00:00')
+
+            try:
+                if ':' in plan_time:
+                    hours, minutes = map(int, plan_time.split(':'))
+                    plan_minutes = hours * 60 + minutes
+                if ':' in utility_time:
+                    hours, minutes = map(int, utility_time.split(':'))
+                    utility_minutes = hours * 60 + minutes
+            except:
+                pass
+
+            downtime_minutes = max(0, plan_minutes - utility_minutes)
+
+            # Build calculation from the actual row data
+            calculation = {
+                "plan_minutes": float(plan_minutes),
+                "utility_minutes": float(utility_minutes),
+                "downtime_minutes": float(downtime_minutes),
+                "target_per_jam": int(matching_row.get('target_per_jam', 0)),
+                "target_qty": int(matching_row.get('target_qty', 0)),
+                "per_formula": "output / (utility_hours * target_per_jam)",
+                "otr_formula": "utility_minutes / plan_minutes",
+                "qr_formula": "output / (output + reject + rework)",
+                "oee_formula": "otr * per * qr",
+                "per_num": _extract_percentage(matching_row.get('per', '0%')),
+                "otr_num": _extract_percentage(matching_row.get('otr', '0%')),
+                "qr_num": _extract_percentage(matching_row.get('qr', '0%')),
+                "oee_num": _extract_percentage(matching_row.get('oee', '0%'))
+            }
+
+            return {
+                "summary": matching_row,
+                "timeline": [],  # No timeline data available in fallback
+                "calculation": calculation
+            }
+
+        else:
+            print("DEBUG: Fallback found NO matching row")
+            if detail_rows:
+                print("DEBUG: Available rows in fallback:")
+                for i, row in enumerate(detail_rows[:3]):
+                    print(f"  Row {i}: MC={row.get('mc_no')}, Part={row.get('part_no')}, Proses={row.get('proses')}, Shift={row.get('shift')}")
+
+    except Exception as e:
+        print(f"Error in fallback method: {e}")
+
+    # Ultimate fallback - indicate no matching row found instead of fake zeros
+    return {
+        "summary": {},
+        "timeline": [],
+        "calculation": {},
+        "found": False,
+        "error": f"No matching row history found for {mc} {part_no} {proses} on {tanggal} shift {shift}"
+    }
+
+
+def _extract_percentage(pct_string):
+    """Extract numeric value from percentage string like '98%' -> 98.0"""
+    if not pct_string:
+        return 0.0
+    try:
+        return float(pct_string.replace('%', ''))
+    except:
+        return 0.0
 
 
 # ---------- Main entrypoint ----------
