@@ -1367,7 +1367,7 @@ def _get_row_history_main(report_type, tanggal, shift, mc, part_no, proses, oper
         target_qty = int(summary_row.get("Target Qty", 0)) if "Target Qty" in summary_row else target_per_jam
 
         summary = {
-            "status": rs._derive_status_from_row(summary_row),
+            "status": summary_row.get("Status", "OK"),
             "operator": summary_row.get("Operator", "-"),
             "mc_no": summary_row.get("MC", "-"),
             "part_no_name": f"{summary_row.get('Part No', '-')} {summary_row.get('Part Name', '-')}".strip(),

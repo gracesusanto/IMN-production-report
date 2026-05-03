@@ -8,7 +8,10 @@ import pandas as pd
 
 import app.service.utils as ru
 
-CATEGORY_CODES = ("U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BR", "BT")
+CATEGORY_CODES = (
+    "U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BR", "BT",
+    "RP", "ST", "X"
+)
 
 
 # TODO: Re-implement contextual Keterangan helper after debugging
@@ -33,7 +36,10 @@ CATEGORY_CODES = ("U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BR
 # Assumption for v1 summary logic:
 # - NP, BT, NO are outside counted plan
 # - change these constants if business finalizes a different rule later
-PLAN_INCLUDED_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR"})
+PLAN_INCLUDED_CODES = frozenset({
+    "U", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR",
+    "RP", "ST", "X"
+})
 
 
 def _report_category_value(report_category: Any) -> str:
@@ -384,8 +390,8 @@ def _status_from_last_desc(desc: str) -> str:
     if code in {"RT", "U"}:
         return "OK"
 
-    if code in {"TP", "TS", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR", "TL"}:
-        return code
+    if code in {"TP", "TS", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR", "TL", "RP", "ST", "X"}:
+        return "STO" if code == "ST" else code
 
     return "OK"
 
@@ -393,61 +399,70 @@ def _status_from_last_desc(desc: str) -> str:
 def _derive_status_from_row(row: dict) -> str:
     """
     Derive status from row data based on downtime categories.
-    Priority: MP > TP > TS > QC > CM > NO > NP > NM > BT > BR > OK
+    Priority:
+    MP > TP > TS > QC > CM > NO > NP > NM > RP > STO/ST > X > BT > BR > OK
     """
-    # Check time-based columns (HH:MM format)
-    if row.get("MP", "00:00") != "00:00":
+
+    def has_time(*keys: str) -> bool:
+        return any((row.get(k, "00:00") != "00:00") for k in keys)
+
+    def has_minutes(*keys: str) -> bool:
+        return any((row.get(k, 0) or 0) > 0 for k in keys)
+
+    # Time-string columns first
+    if has_time("MP"):
         return "MP"
-    if row.get("TP", "00:00") != "00:00":
+    if has_time("TP"):
         return "TP"
-    if row.get("TS", "00:00") != "00:00":
+    if has_time("TS"):
         return "TS"
-    if row.get("QC", "00:00") != "00:00":
+    if has_time("QC"):
         return "QC"
-    if row.get("CM", "00:00") != "00:00":
+    if has_time("CM"):
         return "CM"
-    if row.get("NO", "00:00") != "00:00":
+    if has_time("NO"):
         return "NO"
-    if row.get("NP", "00:00") != "00:00":
+    if has_time("NP"):
         return "NP"
-    if row.get("NM", "00:00") != "00:00":
+    if has_time("NM"):
         return "NM"
-    if row.get("BT", "00:00") != "00:00":
+    if has_time("RP"):
+        return "RP"
+    if has_time("STO", "ST"):
+        return "STO"
+    if has_time("X"):
+        return "X"
+    if has_time("BT"):
         return "BT"
-    if row.get("BR", "00:00") != "00:00":
+    if has_time("BR"):
         return "BR"
 
-    # Check minute-based columns as backup
-    mp_minutes = row.get("MP_Minutes", 0) or 0
-    tp_minutes = row.get("TP_Minutes", 0) or 0
-    ts_minutes = row.get("TS_Minutes", 0) or 0
-    qc_minutes = row.get("QC_Minutes", 0) or 0
-    cm_minutes = row.get("CM_Minutes", 0) or 0
-    no_minutes = row.get("NO_Minutes", 0) or 0
-    np_minutes = row.get("NP_Minutes", 0) or 0
-    nm_minutes = row.get("NM_Minutes", 0) or 0
-    bt_minutes = row.get("BT_Minutes", 0) or 0
-    br_minutes = row.get("BR_Minutes", 0) or 0
-
-    if mp_minutes > 0:
+    # Minute columns as backup
+    if has_minutes("MP_Minutes"):
         return "MP"
-    elif tp_minutes > 0:
+    if has_minutes("TP_Minutes"):
         return "TP"
-    elif ts_minutes > 0:
+    if has_minutes("TS_Minutes"):
         return "TS"
-    elif qc_minutes > 0:
+    if has_minutes("QC_Minutes"):
         return "QC"
-    elif cm_minutes > 0:
+    if has_minutes("CM_Minutes"):
         return "CM"
-    elif no_minutes > 0:
+    if has_minutes("NO_Minutes"):
         return "NO"
-    elif np_minutes > 0:
+    if has_minutes("NP_Minutes"):
         return "NP"
-    elif nm_minutes > 0:
+    if has_minutes("NM_Minutes"):
         return "NM"
-    elif bt_minutes > 0:
+    if has_minutes("RP_Minutes"):
+        return "RP"
+    if has_minutes("STO_Minutes", "ST_Minutes"):
+        return "STO"
+    if has_minutes("X_Minutes"):
+        return "X"
+    if has_minutes("BT_Minutes"):
         return "BT"
-    elif br_minutes > 0:
+    if has_minutes("BR_Minutes"):
         return "BR"
 
     return "OK"
@@ -505,6 +520,12 @@ def _convert_rows_to_api_format(df: pd.DataFrame, report_category: Any) -> list:
             "br": row.get("BR", "00:00"),
             "bt_minutes": int(row.get("BT_Minutes", 0)),
             "bt": row.get("BT", "00:00"),
+            "rp_minutes": int(row.get("RP_Minutes", 0)),
+            "rp": row.get("RP", "00:00"),
+            "sto_minutes": int(row.get("ST_Minutes", row.get("STO_Minutes", 0))),
+            "sto": row.get("ST", row.get("STO", "00:00")),
+            "x_minutes": int(row.get("X_Minutes", 0)),
+            "x": row.get("X", "00:00"),
 
             "catatan": row.get("Keterangan", ""),
 
@@ -613,6 +634,9 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
             "mp": row.get("MP", "00:00"),
             "bt": row.get("BT", "00:00"),
             "br": row.get("BR", "00:00"),
+            "rp": row.get("RP", "00:00"),
+            "sto": row.get("ST", row.get("STO", "00:00")),
+            "x": row.get("X", "00:00"),
             "total_dt": row.get("Total Downtime", "00:00"),
 
             # Use summarized Keterangan, not raw transition text
@@ -674,6 +698,36 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
         detail_rows = detail_rows[start_idx:end_idx]
 
     return {"rows": detail_rows, "total": total_rows}
+
+def _drop_empty_summary_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop summary rows that have no recognized category minutes
+    and no qty/reject/rework.
+
+    This is a safety guard for rows produced by bad category mapping
+    or unexpected summary grain issues.
+    """
+    if df is None or df.empty:
+        return df
+
+    minute_cols = [f"{code}_Minutes" for code in CATEGORY_CODES if f"{code}_Minutes" in df.columns]
+
+    if not minute_cols:
+        return df
+
+    recognized_minutes = df[minute_cols].fillna(0).sum(axis=1)
+    qty = pd.to_numeric(df.get("Qty", 0), errors="coerce").fillna(0)
+    reject = pd.to_numeric(df.get("Reject", 0), errors="coerce").fillna(0)
+    rework = pd.to_numeric(df.get("Rework", 0), errors="coerce").fillna(0)
+
+    keep_mask = (
+        (recognized_minutes > 0) |
+        (qty > 0) |
+        (reject > 0) |
+        (rework > 0)
+    )
+
+    return df.loc[keep_mask].copy()
 
 
 def summarize_dashboard_df(df: pd.DataFrame, report_category: Any) -> pd.DataFrame:
@@ -819,6 +873,8 @@ def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> 
 
     # Derive Status from last activity description
     grouped["Status"] = grouped["Last Desc"].apply(_status_from_last_desc)
+
+    grouped = _drop_empty_summary_rows(grouped)
 
     sort_cols = [c for c in ["Tanggal", "Shift", "Operator", "MC", "Part No", "Proses"] if c in grouped.columns]
     grouped = grouped.sort_values(sort_cols).reset_index(drop=True)

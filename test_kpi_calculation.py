@@ -38,6 +38,13 @@ def _join_unique(series):
 CATEGORY_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BT", "BR"})
 PLAN_INCLUDED_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR"})
 
+CATEGORY_CODES = frozenset({"U", "TL", "TS", "TP", "QC", "CM", "NO", "NP", "NM", "MP", "BR", "BT", "RP", "ST", "X"})
+
+PLAN_INCLUDED_CODES = frozenset({
+    "U", "TL", "TS", "TP", "QC", "CM", "NM", "MP", "BR",
+    "RP", "ST", "X"
+})
+
 def test_summarize_function():
     """Test the summarization logic with realistic mock data"""
     print("=== Testing KPI Calculation ===")
