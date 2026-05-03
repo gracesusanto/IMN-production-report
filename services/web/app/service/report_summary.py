@@ -240,37 +240,32 @@ def split_rows_by_shift(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def build_dashboard_response(df: pd.DataFrame, report_category: Any, pagination=None) -> dict:
+def build_dashboard_response(summary_df: pd.DataFrame, report_category: Any, pagination=None) -> dict:
     """
-    Build complete dashboard response with meta, kpis, rows, and charts.
-    Returns both numeric and display fields for chart compatibility.
+    Build complete dashboard response from an already summarized dataframe.
+    Preserves existing response contract exactly.
     """
-    summary_df = summarize_dashboard_df(df, report_category)
-
     if summary_df.empty:
         return {
             "meta": {
                 "view": f"{_report_category_value(report_category)}_summary",
                 "generated_at": datetime.now().isoformat(),
-                "grain": "tanggal_shift_mc_part_proses" if _report_category_value(report_category) == "mesin" else "tanggal_shift_operator_mc_part_proses",
-                "timezone": "Asia/Jakarta"
+                "grain": "tanggal_shift_mc_part_proses"
+                if _report_category_value(report_category) == "mesin"
+                else "tanggal_shift_operator_mc_part_proses",
+                "timezone": "Asia/Jakarta",
             },
             "kpis": {},
             "charts": {},
             "rows": [],
-            "pagination": {"page": 1, "page_size": 50, "total_rows": 0}
+            "pagination": {"page": 1, "page_size": 50, "total_rows": 0},
         }
 
-    # Calculate aggregated KPIs
+    # Keep KPI/charts based on full summarized dataframe, before pagination
     kpis = _calculate_aggregated_kpis(summary_df)
-
-    # Build chart data
     charts = _build_chart_data(summary_df, report_category)
-
-    # Convert rows to API format with both numeric and display fields
     rows = _convert_rows_to_api_format(summary_df, report_category)
 
-    # Apply pagination to rows
     total_rows = len(rows)
     if pagination:
         start_idx = (pagination.page - 1) * pagination.page_size
@@ -280,26 +275,28 @@ def build_dashboard_response(df: pd.DataFrame, report_category: Any, pagination=
         pagination_info = {
             "page": pagination.page,
             "page_size": pagination.page_size,
-            "total_rows": total_rows
+            "total_rows": total_rows,
         }
     else:
         pagination_info = {
             "page": 1,
             "page_size": total_rows,
-            "total_rows": total_rows
+            "total_rows": total_rows,
         }
 
     return {
         "meta": {
             "view": f"{_report_category_value(report_category)}_summary",
             "generated_at": datetime.now().isoformat(),
-            "grain": "tanggal_shift_mc_part_proses" if _report_category_value(report_category) == "mesin" else "tanggal_shift_operator_mc_part_proses",
-            "timezone": "Asia/Jakarta"
+            "grain": "tanggal_shift_mc_part_proses"
+            if _report_category_value(report_category) == "mesin"
+            else "tanggal_shift_operator_mc_part_proses",
+            "timezone": "Asia/Jakarta",
         },
         "kpis": kpis,
         "charts": charts,
         "rows": rows,
-        "pagination": pagination_info
+        "pagination": pagination_info,
     }
 
 
