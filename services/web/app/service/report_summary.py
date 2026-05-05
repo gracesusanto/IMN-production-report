@@ -699,13 +699,17 @@ def build_detail_export_response(df: pd.DataFrame, report_category: Any, paginat
 
     return {"rows": detail_rows, "total": total_rows}
 
-def _drop_empty_summary_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Drop summary rows that have no recognized category minutes
-    and no qty/reject/rework.
+def _is_blank_value(value) -> bool:
+    value = str(value or "").strip()
+    return value in {"", "-", "- -"}
 
-    This is a safety guard for rows produced by bad category mapping
-    or unexpected summary grain issues.
+
+def _drop_empty_summary_rows(df: pd.DataFrame, report_category: Any = None) -> pd.DataFrame:
+    """
+    Drop rows that should not appear in dashboard summary.
+
+    For operator dashboard, hide non-production placeholder rows like:
+    Operator C / MC '-' / Part '- -' / Proses '-' / target 0 / output 0.
     """
     if df is None or df.empty:
         return df
@@ -726,6 +730,17 @@ def _drop_empty_summary_rows(df: pd.DataFrame) -> pd.DataFrame:
         (reject > 0) |
         (rework > 0)
     )
+
+    category_value = _report_category_value(report_category) if report_category is not None else ""
+
+    if category_value == "operator":
+        has_real_mc = ~df.get("MC", "-").map(_is_blank_value)
+        has_real_part = ~df.get("Part No", "-").map(_is_blank_value)
+        has_real_proses = ~df.get("Proses", "-").map(_is_blank_value)
+        has_real_target = pd.to_numeric(df.get("Target", 0), errors="coerce").fillna(0) > 0
+
+        # Operator dashboard should not show placeholder/no-tooling rows.
+        keep_mask = keep_mask & has_real_mc & has_real_part & has_real_proses & has_real_target
 
     return df.loc[keep_mask].copy()
 
@@ -764,10 +779,20 @@ def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> 
     # )
 
     base_keys = ["Tanggal", "Shift"]
-    if category_value == "operator":
-        base_keys += ["Operator", "MC", "Part No", "Part Name", "Proses"]
-    else:
-        base_keys += ["MC", "Part No", "Part Name", "Proses"]
+
+    if category_value == "operator" and "Operator" in split_df.columns:
+        base_keys.append("Operator")
+
+    base_keys += ["MC"]
+
+    # Use stable tooling grain if available.
+    # Prefer tooling/code fields over only Part No because same part/proses can have different tooling.
+    if "Tooling" in split_df.columns:
+        base_keys.append("Tooling")
+    elif "Kode Tooling" in split_df.columns:
+        base_keys.append("Kode Tooling")
+
+    base_keys += ["Part No", "Part Name", "Proses"]
 
     agg_map: dict[str, Any] = {
         "Qty": "sum",
@@ -802,20 +827,29 @@ def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> 
     )
 
     # Capture the last activity per grouped grain for status derivation
+    last_row_columns = base_keys + ["Desc", "_StartTs", "_StopTs"]
+
+    rename_map = {
+        "Desc": "Last Desc",
+        "_StartTs": "Last StartTs",
+        "_StopTs": "Last StopTs",
+    }
+
+    # IMPORTANT:
+    # Do not rename Operator if Operator is part of base_keys.
+    # Otherwise the merge loses Operator as a key and can duplicate rows.
+    if "Operator" in split_df.columns and "Operator" not in base_keys:
+        last_row_columns.append("Operator")
+        rename_map["Operator"] = "Last Operator"
+
     last_rows = (
         split_df.sort_values(["_StopTs", "_StartTs"])
         .groupby(base_keys, dropna=False)
         .tail(1)
-        [base_keys + ["Desc", "_StartTs", "_StopTs", "Operator"]]
-        .rename(columns={
-            "Desc": "Last Desc",
-            "_StartTs": "Last StartTs",
-            "_StopTs": "Last StopTs",
-            "Operator": "Last Operator",
-        })
+        [last_row_columns]
+        .rename(columns=rename_map)
     )
 
-    # Merge last activity info back to grouped data
     grouped = grouped.merge(last_rows, on=base_keys, how="left")
 
     # TODO: Choose contextual vs plain Keterangan (temporarily disabled)
@@ -874,7 +908,7 @@ def summarize_already_split_df(split_df: pd.DataFrame, report_category: Any) -> 
     # Derive Status from last activity description
     grouped["Status"] = grouped["Last Desc"].apply(_status_from_last_desc)
 
-    grouped = _drop_empty_summary_rows(grouped)
+    grouped = _drop_empty_summary_rows(grouped, report_category)
 
     sort_cols = [c for c in ["Tanggal", "Shift", "Operator", "MC", "Part No", "Proses"] if c in grouped.columns]
     grouped = grouped.sort_values(sort_cols).reset_index(drop=True)
