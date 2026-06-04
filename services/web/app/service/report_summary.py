@@ -118,19 +118,23 @@ def _to_utc_timestamp(value):
 
 def _calculate_shift_window_utc(local_date: datetime, shift: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     year, month, day = local_date.year, local_date.month, local_date.day
+    shift = str(shift)
 
     # Keep existing generate_report behavior:
     # Sunday returns no active shift window.
     if local_date.isoweekday() == 7:
-        zero = pd.Timestamp(datetime(year, month, day, 0, 0), tz='UTC')
+        zero = pd.Timestamp(datetime(year, month, day, 0, 0), tz="UTC")
         return zero, zero
 
     day_of_week = "Saturday" if local_date.isoweekday() == 6 else "Weekday"
-    hour_from = ru.WORKING_SHIFT_JSON[day_of_week]["start"][shift]
 
-    start_local = pd.Timestamp(datetime(year, month, day, hour_from, 0), tz='Asia/Jakarta')
-    start_utc = start_local.tz_convert('UTC')
-    end_utc = start_utc + pd.Timedelta(hours=ru.WORKING_SHIFT_JSON[day_of_week]["duration"])
+    hour_from = ru.WORKING_SHIFT_JSON[day_of_week]["start"][shift]
+    duration_hours = ru.WORKING_SHIFT_JSON[day_of_week]["duration"][shift]
+
+    start_local = pd.Timestamp(datetime(year, month, day, hour_from, 0), tz="Asia/Jakarta")
+    start_utc = start_local.tz_convert("UTC")
+    end_utc = start_utc + pd.Timedelta(hours=duration_hours)
+
     return start_utc, end_utc
 
 
