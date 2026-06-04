@@ -3,26 +3,29 @@ Test report summary functionality - updated with timezone fixes and additional t
 """
 import pandas as pd
 import pytest
+from datetime import date
 
 from app.service import report_summary
-
+from app.service import utils as ru
 
 def _patch_shift_config(monkeypatch):
-    monkeypatch.setattr(
-        report_summary.ru,
-        "WORKING_SHIFT_JSON",
-        {
-            "Weekday": {
-                "start": {"1": 7, "2": 15, "3": 23},
-                "duration": 8,
-            },
-            "Saturday": {
-                "start": {"1": 7, "2": 15, "3": 23},
-                "duration": 8,
-            },
+    shift_config = {
+        "Weekday": {
+            "start": {"1": 7, "2": 15, "3": 23},
+            "duration": {"1": 8, "2": 8, "3": 8},
         },
-    )
+        "Saturday": {
+            "start": {"1": 7, "2": 12, "3": 17},
+            "duration": {"1": 5, "2": 5, "3": 5},
+        },
+        "Sunday": {
+            "start": {"1": 7, "2": 15, "3": 23},
+            "duration": {"1": 8, "2": 8, "3": 8},
+        },
+    }
 
+    monkeypatch.setattr(ru, "WORKING_SHIFT_JSON", shift_config)
+    monkeypatch.setattr(report_summary.ru, "WORKING_SHIFT_JSON", shift_config)
 
 def _utc(ts: str) -> pd.Timestamp:
     """Helper to create UTC timestamps for tests"""
@@ -62,6 +65,198 @@ def test_split_rows_by_shift_preserves_totals(monkeypatch):
     assert split_df["Rework"].sum() == 4
     assert split_df["_DurationMinutes"].sum() == 60.0
 
+def test_saturday_2230_resolves_to_saturday_shift_3(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-23 15:30 = Jakarta Saturday 22:30
+    dt_jakarta = pd.Timestamp("2026-05-23 15:30:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 23)
+    assert shift == 3
+
+
+def test_sunday_0229_resolves_to_saturday_shift_3(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-23 19:29 = Jakarta Sunday 02:29
+    dt_jakarta = pd.Timestamp("2026-05-23 19:29:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 23)
+    assert shift == 3
+
+
+def test_sunday_0230_resolves_to_sunday_shift_1(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-23 19:30 = Jakarta Sunday 02:30
+    dt_jakarta = pd.Timestamp("2026-05-23 19:30:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 24)
+    assert shift == 1
+
+
+def test_sunday_0400_resolves_to_sunday_shift_1(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-23 21:00 = Jakarta Sunday 04:00
+    dt_jakarta = pd.Timestamp("2026-05-23 21:00:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 24)
+    assert shift == 1
+
+
+def test_sunday_2300_resolves_to_sunday_shift_3(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-24 16:00 = Jakarta Sunday 23:00
+    dt_jakarta = pd.Timestamp("2026-05-24 16:00:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 24)
+    assert shift == 3
+
+
+def test_monday_0659_resolves_to_sunday_shift_3(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-24 23:59 = Jakarta Monday 06:59
+    dt_jakarta = pd.Timestamp("2026-05-24 23:59:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 24)
+    assert shift == 3
+
+
+def test_monday_0700_resolves_to_monday_shift_1(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    # UTC 2026-05-25 00:00 = Jakarta Monday 07:00
+    dt_jakarta = pd.Timestamp("2026-05-25 00:00:00", tz="UTC").tz_convert(ru.JAKARTA_TZ)
+
+    business_date, shift = ru.calculate_business_date_and_shift_from_datetime_jakarta(dt_jakarta)
+
+    assert business_date == date(2026, 5, 25)
+    assert shift == 1
+
+def test_build_flexible_shift_window_utc_for_saturday_shift_3(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    time_from, time_to = ru.build_flexible_shift_window_utc(date(2026, 5, 23), "3")
+
+    # Saturday shift 3 official starts Saturday 17:00 Jakarta = 10:00 UTC.
+    assert time_from == pd.Timestamp("2026-05-23 10:00:00").to_pydatetime()
+
+    # Gap between Saturday 22:00 and Sunday 07:00 is split at Sunday 02:30 Jakarta.
+    # Sunday 02:30 Jakarta = Saturday 19:30 UTC.
+    assert time_to == pd.Timestamp("2026-05-23 19:30:00").to_pydatetime()
+
+
+def test_build_flexible_shift_window_utc_for_sunday_shift_1(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    time_from, time_to = ru.build_flexible_shift_window_utc(date(2026, 5, 24), "1")
+
+    # Sunday shift 1 flexible starts at Sunday 02:30 Jakarta = Saturday 19:30 UTC.
+    assert time_from == pd.Timestamp("2026-05-23 19:30:00").to_pydatetime()
+
+    # Sunday shift 1 official ends Sunday 15:00 Jakarta = Sunday 08:00 UTC.
+    assert time_to == pd.Timestamp("2026-05-24 08:00:00").to_pydatetime()
+
+def test_split_rows_by_shift_uses_flexible_saturday_to_sunday_boundary(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    df = pd.DataFrame(
+        [
+            {
+                "MC": "P1-S1",
+                "Operator": "A",
+                "Part No": "SAT-1",
+                "Part Name": "Saturday Part",
+                "Proses": "1/1",
+                "Desc": "U : Utility",
+                "Target": 100,
+                # Jakarta Saturday 21:00 -> Sunday 04:00
+                # UTC Saturday 14:00 -> Saturday 21:00
+                "_StartTs": _utc("2026-05-23 14:00:00"),
+                "_StopTs": _utc("2026-05-23 21:00:00"),
+                "Qty": 140,
+                "Reject": 7,
+                "Rework": 0,
+                "Keterangan": "saturday night into sunday",
+            }
+        ]
+    )
+
+    split_df = report_summary.split_rows_by_shift(df)
+
+    assert len(split_df) == 2
+
+    sat_shift_3 = split_df[
+        (split_df["Tanggal"] == "23/05/2026") &
+        (split_df["Shift"].astype(str) == "3")
+    ].iloc[0]
+
+    sun_shift_1 = split_df[
+        (split_df["Tanggal"] == "24/05/2026") &
+        (split_df["Shift"].astype(str) == "1")
+    ].iloc[0]
+
+    # Saturday 21:00 -> Sunday 02:30 = 5.5 hours = 330 minutes
+    assert sat_shift_3["_DurationMinutes"] == 330.0
+
+    # Sunday 02:30 -> Sunday 04:00 = 1.5 hours = 90 minutes
+    assert sun_shift_1["_DurationMinutes"] == 90.0
+
+    assert split_df["_DurationMinutes"].sum() == 420.0
+    assert split_df["Qty"].sum() == 140
+    assert split_df["Reject"].sum() == 7
+    assert split_df["Rework"].sum() == 0
+
+def test_summary_labels_saturday_gap_until_midpoint_as_saturday_shift_3(monkeypatch):
+    _patch_shift_config(monkeypatch)
+
+    df = pd.DataFrame(
+        [
+            {
+                "MC": "P1-S2",
+                "Operator": "A",
+                "Part No": "SAT-2",
+                "Part Name": "Saturday Part 2",
+                "Proses": "1/1",
+                "Desc": "U : Utility",
+                "Target": 60,
+                # Jakarta Saturday 22:15 -> Saturday 23:15
+                # This is inside the gap, but closer to Saturday shift 3.
+                "_StartTs": _utc("2026-05-23 15:15:00"),
+                "_StopTs": _utc("2026-05-23 16:15:00"),
+                "Qty": 60,
+                "Reject": 0,
+                "Rework": 0,
+                "Keterangan": "gap near saturday",
+            }
+        ]
+    )
+
+    summary = report_summary.summarize_dashboard_df(df, "mesin")
+
+    assert len(summary) == 1
+    row = summary.iloc[0]
+
+    assert row["Tanggal"] == "23/05/2026"
+    assert str(row["Shift"]) == "3"
+    assert row["Qty"] == 60
+    assert row["Plan"] == "01:00"
+    assert row["Utility"] == "01:00"
 
 def test_machine_summary_merges_same_machine_part_proses_in_same_shift(monkeypatch):
     _patch_shift_config(monkeypatch)

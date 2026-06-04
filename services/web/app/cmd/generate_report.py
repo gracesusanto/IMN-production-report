@@ -64,21 +64,16 @@ def _fill_default_datetime(date_from=None, shift_from: str = "1", date_to=None, 
 
 def _calculate_datetime_from_shift(date_time, shift):
     """
-    Keep existing behavior:
-    shift boundaries are interpreted in Jakarta local time,
-    then converted to UTC by subtracting 7 hours.
+    Convert selected report date + shift into UTC query window.
+
+    Uses flexible shift windows from utils.py.
     """
-    year, month, day = date_time.year, date_time.month, date_time.day
+    if hasattr(date_time, "date"):
+        business_date = date_time.date()
+    else:
+        business_date = date_time
 
-    if date_time.isoweekday() == 7:  # Sunday
-        return datetime(year, month, day, 0, 0), datetime(year, month, day, 0, 0)
-
-    day_of_week = "Saturday" if date_time.isoweekday() == 6 else "Weekday"
-    hour_from = ru.WORKING_SHIFT_JSON[day_of_week]["start"][shift]
-
-    time_from = datetime(year, month, day, hour_from, 0) - timedelta(hours=7)
-    time_to = time_from + timedelta(hours=ru.WORKING_SHIFT_JSON[day_of_week]["duration"])
-    return time_from, time_to
+    return ru.build_flexible_shift_window_utc(business_date, str(shift))
 
 
 def _calculate_datetime_range(date_from=None, shift_from: str = "1", date_to=None, shift_to: str = "3"):
