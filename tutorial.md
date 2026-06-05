@@ -44,14 +44,3 @@ docker exec -it postgresql_db psql -U postgres -d imn_db -c "SELECT now(), curre
 1. Taruh data tooling di `data_all.csv` dengan format
 ```['M/C','Tonase','Customer','Part No.','Part Name','Child Part Name','Kode Tooling','Common Tooling Name','Proses','STD Jam (Pcs)','Operator']```
 1. Taruh data operator di `db_operator.csv` dan data mesin di `db_mesin.csv`
-
-
-
-sa_enum_operator_status = sa.Enum(name="operator_status_enum")
-    sa_enum_operator_status.drop(op.get_bind(), checkfirst=True)
-
-    sa_enum_status = sa.Enum(name="status")
-    sa_enum_status.drop(op.get_bind(), checkfirst=True)
-
-    sa_enum_displayed_status = sa.Enum(name="displayed_status")
-    sa_enum_displayed_status.drop(op.get_bind(), checkfirst=True)

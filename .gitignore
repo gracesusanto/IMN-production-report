@@ -1,5 +1,7 @@
 .env
 .DS_store
+*.pyc
+*.pyo
 __pycache__
 alembic/__pycache__
 *.csv
