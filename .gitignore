@@ -1,5 +1,9 @@
 .env
-__pycache__/
+.DS_store
 *.pyc
 *.pyo
-.DS_Store
+__pycache__
+alembic/__pycache__
+*.csv
+*.sql
+result_*

@@ -14,14 +14,33 @@ docker-compose run app python3 generate_report.py
 docker-compose -f docker-compose.prod.yml build
 docker-compose -f docker-compose.prod.yml up
 
-docker exec -it imn-production-app-prod /bin/bash
 docker exec -it app /bin/bash
+cd app/cmd
+python3 -m app.cmd.db_ingestion
+python3 -m app.cmd.generate_report
 python3 db_ingestion.py
+python3 generate_report.py
+
+Alembic migration
+docker exec -it app /bin/bash
+docker-compose run app alembic upgrade head
 
 docker logs --follow app
 
-docker-compose up --force-recreate
+docker compose exec postgres psql -U <YOUR_USER> -d <YOUR_DB> -c "SHOW timezone;"
+docker compose exec postgres psql -U <YOUR_USER> -d <YOUR_DB> -c "SELECT now(), current_setting('TimeZone');"
 
-docker-compose rm -f
-docker-compose pull
-docker-compose up --build -d
+docker compose exec db psql -U dev_user -d dev_db -c "SHOW timezone;"
+docker compose exec db psql -U dev_user -d dev_db -c "SELECT now(), current_setting('TimeZone');"
+
+docker exec -it postgres_dev psql -U dev_user -d dev_db -c "SHOW timezone;"
+docker exec -it postgres_dev psql -U dev_user -d dev_db -c "SELECT now(), current_setting('TimeZone');"
+
+docker exec -it postgresql_db psql -U postgres -d imn_db -c "SHOW timezone;"
+docker exec -it postgresql_db psql -U postgres -d imn_db -c "SELECT now(), current_setting('TimeZone');"
+
+
+### Cara Memasukan Database
+1. Taruh data tooling di `data_all.csv` dengan format
+```['M/C','Tonase','Customer','Part No.','Part Name','Child Part Name','Kode Tooling','Common Tooling Name','Proses','STD Jam (Pcs)','Operator']```
+1. Taruh data operator di `db_operator.csv` dan data mesin di `db_mesin.csv`
