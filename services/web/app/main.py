@@ -24,6 +24,7 @@ import app.cmd.backup_csv.backup as backup
 import app.cmd.get_id as get_id
 import app.cmd.mock_data as mock_data
 import app.cmd.backfill_report_facts as backfill_report_facts
+import app.cmd.seed_from_csv as seed_from_csv
 
 load_dotenv(".env")
 
@@ -1185,6 +1186,24 @@ def report_backfill(request: schema.ReportBackfillRequest, session=Sessioner):
 
 
 # ----- DEV-ONLY ENDPOINTS ----- #
+@app.post("/dev/seed-from-csv")
+def dev_seed_from_csv(session=Sessioner):
+    """
+    Seed the database from the production CSV dump in data/seed_csv/.
+    Timestamps are shifted so the latest record lands on today.
+    Safe to call multiple times — existing PKs are skipped.
+    """
+    try:
+        result = seed_from_csv.seed_from_csv(session)
+        return {"status": "success", **result}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        session.rollback()
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/dev/mock/seed-report-scenario")
 def dev_seed_report_scenario(session=Sessioner):
     """
