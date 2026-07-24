@@ -267,3 +267,107 @@ class RowHistoryResponse(BaseModel):
     summary: Dict[str, Any]
     timeline: List[TimelineActivity]
     calculation: CalculationBreakdown
+
+
+# --- Andon board schemas ---
+
+class AndonOperator(BaseModel):
+    operator_id: str
+    operator_name: str
+    status_codes: List[str] = []
+    activity_ids: List[int] = []
+
+
+class AndonTooling(BaseModel):
+    tooling_id: str
+    part_name: Optional[str] = None
+    part_no: Optional[str] = None
+    tooling_code: Optional[str] = None
+    process: Optional[str] = None
+
+
+class AndonOpenActivity(BaseModel):
+    activity_id: int
+    operator_id: Optional[str] = None
+    tooling_id: Optional[str] = None
+
+    operator_name: Optional[str] = None
+
+    category_code: str
+    category_label: str
+    category_raw: Optional[str] = None
+
+    part_name: Optional[str] = None
+    part_no: Optional[str] = None
+    tooling_code: Optional[str] = None
+    process: Optional[str] = None
+
+    started_at: Optional[datetime] = None
+    is_stale: bool = False
+
+
+class AndonMachineCard(BaseModel):
+    machine_id: str
+    machine_name: str
+    tonnage: Optional[int] = None
+    plant: str
+    line: str
+    display_order: int = 9999
+
+    status_code: str
+    status_label: str
+    status_group: str
+    status_source: str
+
+    show_timer: bool = False
+    show_started_at: bool = False
+
+    started_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    last_start_at: Optional[datetime] = None
+
+    part_name: Optional[str] = None
+    part_display_mode: str = "active"
+    operator_display_mode: str = "active"
+
+    operators: List[AndonOperator] = []
+    operator_count: int = 0
+
+    toolings: List[AndonTooling] = []
+    open_activities: List[AndonOpenActivity] = []
+
+    primary_activity_id: Optional[int] = None
+    source_activity_ids: List[int] = []
+    source_start_log_ids: List[int] = []
+
+    has_mixed_status: bool = False
+    has_multiple_parts: bool = False
+    warnings: List[str] = []
+    version_token: Optional[str] = None
+
+
+class AndonLineGroup(BaseModel):
+    name: str
+    machines: List[AndonMachineCard]
+
+
+class AndonPlantGroup(BaseModel):
+    name: str
+    display_name: str
+    lines: List[AndonLineGroup]
+
+
+class AndonSummary(BaseModel):
+    total: int = 0
+    running: int = 0
+    downtime: int = 0
+    setup: int = 0
+    no_plan: int = 0
+    other: int = 0
+
+
+class AndonBoardResponse(BaseModel):
+    generated_at: datetime
+    refresh_after_seconds: int
+    summary: AndonSummary
+    plants: List[AndonPlantGroup]

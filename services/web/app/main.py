@@ -14,6 +14,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import case, func, desc, text
 
 import app.service.business_logic as business_logic
+import app.service.andon_service as andon_service
 import app.model.models as models
 import app.schema as schema
 from app.database import Sessioner
@@ -1234,6 +1235,11 @@ def dev_seed_report_scenario(session=Sessioner):
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to seed data: {str(e)}")
+
+
+@app.get("/api/andon/board", response_model=schema.AndonBoardResponse)
+def get_andon_board(session=Sessioner):
+    return andon_service.get_andon_board(session)
 
 
 if __name__ == "__main__":

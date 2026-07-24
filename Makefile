@@ -1,4 +1,5 @@
-.PHONY: build start login logs dev-build dev-start dev-login dev-logs
+.PHONY: build start login logs dev-build dev-start dev-login dev-logs \
+        migrate dev-migrate db-revision dev-db-revision db-history dev-db-history db-downgrade dev-db-downgrade
 
 # Build the Docker containers using docker-compose
 build:
@@ -53,3 +54,40 @@ dev-test:
 
 # Run tests (alias for dev-test)
 test: dev-test
+
+# ======= Alembic / Database Migrations =======
+# Apply all pending migrations (production container)
+migrate:
+	docker exec app bash -c "cd /app && alembic upgrade head"
+
+# Apply all pending migrations (dev container)
+dev-migrate:
+	docker exec api_dev bash -c "cd /app && alembic upgrade head"
+
+# Create a new migration revision — usage: make db-revision MSG="describe change"
+db-revision:
+	docker exec app bash -c "cd /app && alembic revision --autogenerate -m '$(MSG)'"
+
+dev-db-revision:
+	docker exec api_dev bash -c "cd /app && alembic revision --autogenerate -m '$(MSG)'"
+
+# Show migration history
+db-history:
+	docker exec app bash -c "cd /app && alembic history --verbose"
+
+dev-db-history:
+	docker exec api_dev bash -c "cd /app && alembic history --verbose"
+
+# Show current migration head
+db-current:
+	docker exec app bash -c "cd /app && alembic current"
+
+dev-db-current:
+	docker exec api_dev bash -c "cd /app && alembic current"
+
+# Downgrade one revision — usage: make db-downgrade (steps down by 1)
+db-downgrade:
+	docker exec app bash -c "cd /app && alembic downgrade -1"
+
+dev-db-downgrade:
+	docker exec api_dev bash -c "cd /app && alembic downgrade -1"
