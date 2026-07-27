@@ -43,7 +43,6 @@ def _category_code(category: str) -> str:
 # PROCESS_GROUP_CONFIG: maps each line name to its display group and sort order.
 #   process_group  — top-level grouping shown on the andon board
 #   group_order    — sort order of the process group
-#   line_order     — sort order within the group (for multi-line groups like Stamping)
 # ---------------------------------------------------------------------------
 
 # Line → process group mapping.
@@ -51,19 +50,19 @@ def _category_code(category: str) -> str:
 # Stamping  = A–F, H prefixes.
 # Others    = Tempering, Shearing, and anything unrecognised.
 PROCESS_GROUP_CONFIG = {
-    "STAMPING LINE A": {"process_group": "Stamping",           "group_order": 10, "line_order": 10},
-    "STAMPING LINE B": {"process_group": "Stamping",           "group_order": 10, "line_order": 20},
-    "STAMPING LINE C": {"process_group": "Stamping",           "group_order": 10, "line_order": 30},
-    "STAMPING LINE D": {"process_group": "Stamping",           "group_order": 10, "line_order": 40},
-    "STAMPING LINE E": {"process_group": "Stamping",           "group_order": 10, "line_order": 50},
-    "STAMPING LINE F": {"process_group": "Stamping",           "group_order": 10, "line_order": 60},
-    "STAMPING LINE H": {"process_group": "Stamping",           "group_order": 10, "line_order": 70},
-    "MACHINING LINE":  {"process_group": "Machining",          "group_order": 20, "line_order": 10},
-    "WELDING LINE":    {"process_group": "Welding",            "group_order": 30, "line_order": 10},
-    "PACKING LINE":    {"process_group": "Packing & Check Load","group_order": 40, "line_order": 10},
-    "TEMPERING":       {"process_group": "Others",             "group_order": 50, "line_order": 10},
-    "SHEARING":        {"process_group": "Others",             "group_order": 50, "line_order": 20},
-    "OTHER":           {"process_group": "Others",             "group_order": 50, "line_order": 999},
+    "STAMPING LINE A": {"process_group": "Stamping",            "group_order": 10},
+    "STAMPING LINE B": {"process_group": "Stamping",            "group_order": 10},
+    "STAMPING LINE C": {"process_group": "Stamping",            "group_order": 10},
+    "STAMPING LINE D": {"process_group": "Stamping",            "group_order": 10},
+    "STAMPING LINE E": {"process_group": "Stamping",            "group_order": 10},
+    "STAMPING LINE F": {"process_group": "Stamping",            "group_order": 10},
+    "STAMPING LINE H": {"process_group": "Stamping",            "group_order": 10},
+    "MACHINING LINE":  {"process_group": "Machining",           "group_order": 20},
+    "WELDING LINE":    {"process_group": "Welding",             "group_order": 30},
+    "PACKING LINE":    {"process_group": "Packing & Check Load","group_order": 40},
+    "TEMPERING":       {"process_group": "Others",              "group_order": 50},
+    "SHEARING":        {"process_group": "Others",              "group_order": 50},
+    "OTHER":           {"process_group": "Others",              "group_order": 50},
 }
 
 # Line prefixes: A–F, H = Stamping; G = Machining (all G-lines are machining).
@@ -99,9 +98,17 @@ def _determine_line(name: str | None) -> str:
     return "OTHER"
 
 
-def _machine_order(name: str | None) -> int:
-    m = _NUMBER.search(_normalize(name))
-    return int(m.group(1)) if m else 9999
+_MACHINE_KEY = re.compile(r"^(?P<prefix>[A-Z]+)(?P<number>\d+)", re.IGNORECASE)
+
+def _machine_sort_key(name: str | None) -> tuple:
+    """Sort key: (letter_prefix, number) so A1 < A2 < B1 < W1 etc."""
+    n = _normalize(name)
+    m = _MACHINE_KEY.match(n)
+    if m:
+        return (m.group("prefix").upper(), int(m.group("number")))
+    # Fallback: treat as very high value
+    digits = _NUMBER.search(n)
+    return ("~", int(digits.group(1)) if digits else 9999)
 
 
 _PLANT_SUFFIX = re.compile(r"(?:-|[\s_])P(?P<plant>[12])$", re.IGNORECASE)
@@ -120,8 +127,7 @@ class _Layout:
     line_name: str
     process_group: str
     group_order: int
-    line_order: int
-    machine_order: int
+    machine_sort_key: tuple
 
 
 def _layout(name: str | None) -> _Layout:
@@ -133,8 +139,7 @@ def _layout(name: str | None) -> _Layout:
         line_name=line,
         process_group=cfg["process_group"],
         group_order=cfg["group_order"],
-        line_order=cfg["line_order"],
-        machine_order=_machine_order(name),
+        machine_sort_key=_machine_sort_key(name),
     )
 
 
@@ -360,7 +365,7 @@ def _build_active_card(machine, rows, layout: _Layout, now: datetime) -> schema.
         plant=layout.plant,
         process_group=layout.process_group,
         line=layout.line_name,
-        display_order=layout.machine_order,
+        display_order=0,
 
         status_code=selected_code,
         status_label=selected_status["label"],
@@ -404,7 +409,7 @@ def _build_no_schedule_card(machine, layout: _Layout) -> schema.AndonMachineCard
         plant=layout.plant,
         process_group=layout.process_group,
         line=layout.line_name,
-        display_order=layout.machine_order,
+        display_order=0,
 
         status_code="NP",
         status_label="NO SCHEDULE",
@@ -476,7 +481,7 @@ def get_andon_board(session) -> schema.AndonBoardResponse:
     for plant_name, groups_dict in sorted(plant_group_map.items(), key=lambda item: PLANT_ORDER.get(item[0], 999)):
         process_groups = []
         for group_name, group_cards in sorted(groups_dict.items(), key=lambda item: group_order_of.get(item[0], 999)):
-            group_cards.sort(key=lambda c: (c.display_order, c.machine_name))
+            group_cards.sort(key=lambda c: _machine_sort_key(c.machine_name))
             process_groups.append(schema.AndonProcessGroup(name=group_name, machines=group_cards))
         plants.append(schema.AndonPlantGroup(
             name=plant_name,
