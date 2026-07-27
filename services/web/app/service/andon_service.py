@@ -80,7 +80,7 @@ def _normalize(name: str | None) -> str:
 
 def _determine_line(name: str | None) -> str:
     n = _normalize(name)
-    if n.startswith("MEJAPACK"):
+    if n.startswith("MEJAPACK") or n.startswith("CHECKLOAD"):
         return "PACKING LINE"
     if n.startswith("TEMPERING"):
         return "TEMPERING"
