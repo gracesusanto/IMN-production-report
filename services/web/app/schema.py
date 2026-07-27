@@ -327,6 +327,7 @@ class AndonMachineCard(BaseModel):
     last_start_at: Optional[datetime] = None
 
     part_name: Optional[str] = None
+    part_display: Optional[str] = None
     part_display_mode: str = "active"
     operator_display_mode: str = "active"
 

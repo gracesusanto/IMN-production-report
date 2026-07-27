@@ -34,6 +34,24 @@ STATUS_CONFIG = {
 }
 
 
+def build_part_display(part_name: str | None, proses: str | None) -> str | None:
+    normalized_part = (part_name or "").strip()
+    if not normalized_part:
+        return None
+    normalized_process = (proses or "").strip()
+    if not normalized_process:
+        return normalized_part
+    normalized_process = re.sub(
+        r"^(proses|process|prs?\.?)\s*",
+        "",
+        normalized_process,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not normalized_process:
+        return normalized_part
+    return f"{normalized_part} Prs. {normalized_process}"
+
+
 def _category_code(category: str) -> str:
     if not category:
         return ""
@@ -319,6 +337,14 @@ def _build_active_card(machine, rows, layout: _Layout, now: datetime) -> schema.
         else None
     )
 
+    # For part_display pick the process from the selected row's tooling.
+    selected_process = selected_row.get("proses")
+    part_display = (
+        build_part_display(part_name, selected_process)
+        if len(part_names) == 1
+        else part_name
+    )
+
     warnings = []
     if len(codes) > 1:
         warnings.append("MIXED_STATUS")
@@ -349,6 +375,7 @@ def _build_active_card(machine, rows, layout: _Layout, now: datetime) -> schema.
         last_start_at=last_start_at if show_timer else None,
 
         part_name=part_name,
+        part_display=part_display,
         part_display_mode="active",
         operator_display_mode="active",
 
