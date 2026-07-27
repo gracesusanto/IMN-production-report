@@ -7,6 +7,46 @@ import pandas as pd
 
 JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
 
+# ---------------------------------------------------------------------------
+# Category / status configuration
+# Canonical list — mirrors mobile app mKategoriList (Navigation.kt).
+# Used by andon_service, report logic, and any filter that needs code→label.
+#
+# Flags per entry:
+#   non_machine — aktivitas yang tidak melibatkan mesin (NP, BT, BR).
+#                 /operator/status: tidak tampilkan pilihan STOP.
+#                 /activity/status: tidak tampilkan active activity mesin/operator.
+#   setup       — aktivitas setup yang menghasilkan reject dan rework (TL, TS, TP).
+#                 CM juga group "setup" tapi tidak menghasilkan output, jadi tidak di-flag.
+#   no_plan     — dipakai di /activity/status supaya tidak tampilkan kegiatan NP operator.
+# ---------------------------------------------------------------------------
+STATUS_CONFIG = {
+    "U":   {"label": "RUNNING",          "group": "running",  "priority": 100},
+    "MP":  {"label": "MACHINE PROBLEM",  "group": "downtime", "priority": 90},
+    "TP":  {"label": "TOOLING PROBLEM",  "group": "downtime", "priority": 80,  "setup": True},
+    "NM":  {"label": "NO MATERIAL",      "group": "downtime", "priority": 70},
+    "QC":  {"label": "QUALITY CHECK",    "group": "downtime", "priority": 60},
+    "TS":  {"label": "TOOLING SETTING",  "group": "setup",    "priority": 40,  "setup": True},
+    "TL":  {"label": "TRIAL",            "group": "setup",    "priority": 40,  "setup": True},
+    "CM":  {"label": "CHANGE MATERIAL",  "group": "setup",    "priority": 40},
+    "NP":  {"label": "NO SCHEDULE",      "group": "no_plan",  "priority": 30,  "non_machine": True, "no_plan": True},
+    "BT":  {"label": "BREAKTIME",        "group": "no_plan",  "priority": 20,  "non_machine": True},
+    "BR":  {"label": "BRIEFING",         "group": "no_plan",  "priority": 20,  "non_machine": True},
+    "RP":  {"label": "REPORTING",        "group": "no_plan",  "priority": 20},
+    "STO": {"label": "STOCK OPNAME",     "group": "no_plan",  "priority": 20},
+    "X":   {"label": "X",                "group": "no_plan",  "priority": 10},
+}
+
+# Derived sets — read from the flags above, never hardcoded separately.
+NON_MACHINE_CODES: frozenset[str] = frozenset(c for c, cfg in STATUS_CONFIG.items() if cfg.get("non_machine"))
+SETUP_CODES: frozenset[str]       = frozenset(c for c, cfg in STATUS_CONFIG.items() if cfg.get("setup"))
+NO_PLAN_CODES: frozenset[str]     = frozenset(c for c, cfg in STATUS_CONFIG.items() if cfg.get("no_plan"))
+
+# Full-string lists ("CODE : Label") for SQL .in_() filters in business_logic.
+NON_MACHINE_CATEGORY: list[str] = [f"{c} : {cfg['label'].title()}" for c, cfg in STATUS_CONFIG.items() if cfg.get("non_machine")]
+SETUP_CATEGORY: list[str]       = [f"{c} : {cfg['label'].title()}" for c, cfg in STATUS_CONFIG.items() if cfg.get("setup")]
+NO_PLAN_CATEGORY: list[str]     = [f"{c} : {cfg['label'].title()}" for c, cfg in STATUS_CONFIG.items() if cfg.get("no_plan")]
+
 WORKING_SHIFT_JSON = {
     "Weekday": {
         "start": {"1": 7, "2": 15, "3": 23},

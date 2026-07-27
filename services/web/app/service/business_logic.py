@@ -18,21 +18,11 @@ from pydantic import ValidationError
 import app.model.models as models
 import app.schema as schema
 import app.service.report as report
-
-# Kategori yang tidak melibatkan mesin
-# Dipakai di /operator/status supaya tidak usah menampilkan pilihan STOP untuk kategori ini
-# Dan di /activity/status supaya tidak usah menampilkan active activity mesin/operator
-NON_MACHINE_CATEGORY = ["NP : No Plan", "BT : Breaktime", "BR : Briefing"]
-
-# Setup Category produces reject and rework
-SETUP_CATEGORY = ["TL : Trial", "TS : Tooling Setting", "TP : Tooling Problem"]
-
-# Dipakai di /activity/status supaya tidak usah menampilkan kegiatan operator yang NP
-NO_PLAN_CATEGORY = ["NP : No Plan"]
-
-# Category code sets for consistent checking
-NON_MACHINE_CODES = {"NP", "BT", "BR"}
-SETUP_CODES = {"TL", "TS", "TP"}
+from app.service.utils import (
+    NON_MACHINE_CODES,
+    NON_MACHINE_CATEGORY,
+    SETUP_CODES,
+)
 
 
 def _category_code(category: str) -> str:

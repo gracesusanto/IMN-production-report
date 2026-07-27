@@ -310,7 +310,8 @@ class AndonMachineCard(BaseModel):
     machine_id: str
     machine_name: str
     tonnage: Optional[int] = None
-    plant: str
+    plant: str = "OTHER"
+    process_group: str = "Others"
     line: str
     display_order: int = 9999
 
@@ -347,7 +348,7 @@ class AndonMachineCard(BaseModel):
     version_token: Optional[str] = None
 
 
-class AndonLineGroup(BaseModel):
+class AndonProcessGroup(BaseModel):
     name: str
     machines: List[AndonMachineCard]
 
@@ -355,7 +356,7 @@ class AndonLineGroup(BaseModel):
 class AndonPlantGroup(BaseModel):
     name: str
     display_name: str
-    lines: List[AndonLineGroup]
+    process_groups: List[AndonProcessGroup]
 
 
 class AndonSummary(BaseModel):

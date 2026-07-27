@@ -17,6 +17,7 @@ import app.service.business_logic as business_logic
 import app.service.andon_service as andon_service
 import app.model.models as models
 import app.schema as schema
+from app.service.utils import STATUS_CONFIG
 from app.database import Sessioner
 import app.cmd.generate_report as generate_report
 import app.cmd.db_ingestion as db_ingestion
@@ -1240,6 +1241,15 @@ def dev_seed_report_scenario(session=Sessioner):
 @app.get("/api/andon/board", response_model=schema.AndonBoardResponse)
 def get_andon_board(session=Sessioner):
     return andon_service.get_andon_board(session)
+
+
+@app.get("/api/meta/categories")
+def get_categories():
+    """Return the full ordered category list used by the mobile app and andon filters."""
+    return [
+        {"code": code, "label": cfg["label"].title(), "group": cfg["group"]}
+        for code, cfg in STATUS_CONFIG.items()
+    ]
 
 
 if __name__ == "__main__":

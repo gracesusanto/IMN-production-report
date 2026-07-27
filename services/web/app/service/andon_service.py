@@ -10,28 +10,7 @@ from sqlalchemy.orm import aliased
 
 import app.model.models as models
 import app.schema as schema
-
-
-# ---------------------------------------------------------------------------
-# Status configuration
-# ---------------------------------------------------------------------------
-
-STATUS_CONFIG = {
-    "U":   {"label": "RUNNING",          "group": "running",  "priority": 100},
-    "MP":  {"label": "MACHINE PROBLEM",  "group": "downtime", "priority": 90},
-    "TP":  {"label": "TOOLING PROBLEM",  "group": "downtime", "priority": 80},
-    "NM":  {"label": "NO MATERIAL",      "group": "downtime", "priority": 70},
-    "QC":  {"label": "QUALITY CHECK",    "group": "downtime", "priority": 60},
-    "TS":  {"label": "TOOLING SETTING",  "group": "setup",    "priority": 40},
-    "TL":  {"label": "TRIAL",            "group": "setup",    "priority": 40},
-    "CM":  {"label": "CHANGE MATERIAL",  "group": "setup",    "priority": 40},
-    "NP":  {"label": "NO SCHEDULE",      "group": "no_plan",  "priority": 30},
-    "BT":  {"label": "BREAKTIME",        "group": "no_plan",  "priority": 20},
-    "BR":  {"label": "BRIEFING",         "group": "no_plan",  "priority": 20},
-    "RP":  {"label": "REPORTING",        "group": "no_plan",  "priority": 20},
-    "STO": {"label": "STOCK OPNAME",     "group": "no_plan",  "priority": 20},
-    "X":   {"label": "X",                "group": "no_plan",  "priority": 10},
-}
+from app.service.utils import STATUS_CONFIG
 
 
 def build_part_display(part_name: str | None, proses: str | None) -> str | None:
@@ -59,42 +38,45 @@ def _category_code(category: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Deterministic plant / line layout parser
+# Deterministic layout parser — groups by process type, not plant.
+#
+# PROCESS_GROUP_CONFIG: maps each line name to its display group and sort order.
+#   process_group  — top-level grouping shown on the andon board
+#   group_order    — sort order of the process group
+#   line_order     — sort order within the group (for multi-line groups like Stamping)
 # ---------------------------------------------------------------------------
 
-PLANT_ORDER = {"P1": 10, "P2": 20, "OTHER": 999}
-
-LINE_ORDER = {
-    "STAMPING LINE A": 10,
-    "STAMPING LINE B": 20,
-    "STAMPING LINE C": 30,
-    "STAMPING LINE D": 40,
-    "STAMPING LINE E": 50,
-    "STAMPING LINE F": 60,
-    "STAMPING LINE G": 70,
-    "STAMPING LINE H": 80,
-    "WELDING LINE":    90,
-    "PACKING LINE":   100,
-    "TEMPERING":      110,
-    "SHEARING":       120,
-    "OTHER":          999,
+# Line → process group mapping.
+# Machining = all G-prefix machines (G1-P1 … G8-P1).
+# Stamping  = A–F, H prefixes.
+# Others    = Tempering, Shearing, and anything unrecognised.
+PROCESS_GROUP_CONFIG = {
+    "STAMPING LINE A": {"process_group": "Stamping",           "group_order": 10, "line_order": 10},
+    "STAMPING LINE B": {"process_group": "Stamping",           "group_order": 10, "line_order": 20},
+    "STAMPING LINE C": {"process_group": "Stamping",           "group_order": 10, "line_order": 30},
+    "STAMPING LINE D": {"process_group": "Stamping",           "group_order": 10, "line_order": 40},
+    "STAMPING LINE E": {"process_group": "Stamping",           "group_order": 10, "line_order": 50},
+    "STAMPING LINE F": {"process_group": "Stamping",           "group_order": 10, "line_order": 60},
+    "STAMPING LINE H": {"process_group": "Stamping",           "group_order": 10, "line_order": 70},
+    "MACHINING LINE":  {"process_group": "Machining",          "group_order": 20, "line_order": 10},
+    "WELDING LINE":    {"process_group": "Welding",            "group_order": 30, "line_order": 10},
+    "PACKING LINE":    {"process_group": "Packing & Check Load","group_order": 40, "line_order": 10},
+    "TEMPERING":       {"process_group": "Others",             "group_order": 50, "line_order": 10},
+    "SHEARING":        {"process_group": "Others",             "group_order": 50, "line_order": 20},
+    "OTHER":           {"process_group": "Others",             "group_order": 50, "line_order": 999},
 }
 
-STAMPING_PREFIXES = {"A", "B", "C", "D", "E", "F", "G", "H"}
+# Line prefixes: A–F, H = Stamping; G = Machining (all G-lines are machining).
+STAMPING_PREFIXES = {"A", "B", "C", "D", "E", "F", "H"}
+MACHINING_PREFIXES = {"G"}
 
-_PLANT_SUFFIX = re.compile(r"(?:-|[\s_])P(?P<plant>[12])$", re.IGNORECASE)
-_STAMPING     = re.compile(r"^(?P<line>[A-Z])(?P<number>\d+)(?P<variant>[A-Z]*)(?:-|[\s_])P[12]$", re.IGNORECASE)
-_WELDING      = re.compile(r"^W\d+(?:-|[\s_])P[12]$", re.IGNORECASE)
-_NUMBER       = re.compile(r"(\d+)")
+_STAMPING = re.compile(r"^(?P<line>[A-Z])(?P<number>\d+)(?P<variant>[A-Z]*)(?:-|[\s_])P[12]$", re.IGNORECASE)
+_WELDING  = re.compile(r"^W\d+(?:-|[\s_])P[12]$", re.IGNORECASE)
+_NUMBER   = re.compile(r"(\d+)")
 
 
 def _normalize(name: str | None) -> str:
     return re.sub(r"\s+", " ", (name or "").strip()).upper()
-
-
-def _determine_plant(name: str | None) -> str:
-    m = _PLANT_SUFFIX.search(_normalize(name))
-    return f"P{m.group('plant')}" if m else "OTHER"
 
 
 def _determine_line(name: str | None) -> str:
@@ -108,8 +90,12 @@ def _determine_line(name: str | None) -> str:
     if _WELDING.match(n):
         return "WELDING LINE"
     m = _STAMPING.match(n)
-    if m and m.group("line").upper() in STAMPING_PREFIXES:
-        return f"STAMPING LINE {m.group('line').upper()}"
+    if m:
+        prefix = m.group("line").upper()
+        if prefix in MACHINING_PREFIXES:
+            return "MACHINING LINE"
+        if prefix in STAMPING_PREFIXES:
+            return f"STAMPING LINE {prefix}"
     return "OTHER"
 
 
@@ -118,11 +104,22 @@ def _machine_order(name: str | None) -> int:
     return int(m.group(1)) if m else 9999
 
 
+_PLANT_SUFFIX = re.compile(r"(?:-|[\s_])P(?P<plant>[12])$", re.IGNORECASE)
+
+PLANT_ORDER = {"P1": 10, "P2": 20, "OTHER": 999}
+
+
+def _determine_plant(name: str | None) -> str:
+    m = _PLANT_SUFFIX.search(_normalize(name))
+    return f"P{m.group('plant')}" if m else "OTHER"
+
+
 @dataclass(frozen=True)
 class _Layout:
     plant: str
     line_name: str
-    plant_order: int
+    process_group: str
+    group_order: int
     line_order: int
     machine_order: int
 
@@ -130,11 +127,13 @@ class _Layout:
 def _layout(name: str | None) -> _Layout:
     plant = _determine_plant(name)
     line = _determine_line(name)
+    cfg = PROCESS_GROUP_CONFIG.get(line, PROCESS_GROUP_CONFIG["OTHER"])
     return _Layout(
         plant=plant,
         line_name=line,
-        plant_order=PLANT_ORDER.get(plant, 999),
-        line_order=LINE_ORDER.get(line, 999),
+        process_group=cfg["process_group"],
+        group_order=cfg["group_order"],
+        line_order=cfg["line_order"],
         machine_order=_machine_order(name),
     )
 
@@ -359,6 +358,7 @@ def _build_active_card(machine, rows, layout: _Layout, now: datetime) -> schema.
         machine_name=machine.name,
         tonnage=machine.tonase,
         plant=layout.plant,
+        process_group=layout.process_group,
         line=layout.line_name,
         display_order=layout.machine_order,
 
@@ -402,6 +402,7 @@ def _build_no_schedule_card(machine, layout: _Layout) -> schema.AndonMachineCard
         machine_name=machine.name,
         tonnage=machine.tonase,
         plant=layout.plant,
+        process_group=layout.process_group,
         line=layout.line_name,
         display_order=layout.machine_order,
 
@@ -464,21 +465,23 @@ def get_andon_board(session) -> schema.AndonBoardResponse:
             card = _build_no_schedule_card(machine=machine, layout=lo)
         cards.append(card)
 
-    # Group: plant → line → machines (sorted by display_order then name)
-    plant_line_map: dict = defaultdict(lambda: defaultdict(list))
+    # Group: plant → process_group → machines (no line sub-grouping)
+    group_order_of = {cfg["process_group"]: cfg["group_order"] for cfg in PROCESS_GROUP_CONFIG.values()}
+
+    plant_group_map: dict = defaultdict(lambda: defaultdict(list))
     for card in cards:
-        plant_line_map[card.plant][card.line].append(card)
+        plant_group_map[card.plant][card.process_group].append(card)
 
     plants = []
-    for plant_name, lines_dict in sorted(plant_line_map.items(), key=lambda item: PLANT_ORDER.get(item[0], 999)):
-        lines = []
-        for line_name, line_cards in sorted(lines_dict.items(), key=lambda item: LINE_ORDER.get(item[0], 999)):
-            line_cards.sort(key=lambda c: (c.display_order, c.machine_name))
-            lines.append(schema.AndonLineGroup(name=line_name, machines=line_cards))
+    for plant_name, groups_dict in sorted(plant_group_map.items(), key=lambda item: PLANT_ORDER.get(item[0], 999)):
+        process_groups = []
+        for group_name, group_cards in sorted(groups_dict.items(), key=lambda item: group_order_of.get(item[0], 999)):
+            group_cards.sort(key=lambda c: (c.display_order, c.machine_name))
+            process_groups.append(schema.AndonProcessGroup(name=group_name, machines=group_cards))
         plants.append(schema.AndonPlantGroup(
             name=plant_name,
             display_name={"P1": "PLANT 1", "P2": "PLANT 2"}.get(plant_name, plant_name),
-            lines=lines,
+            process_groups=process_groups,
         ))
 
     summary = schema.AndonSummary(
@@ -496,3 +499,4 @@ def get_andon_board(session) -> schema.AndonBoardResponse:
         summary=summary,
         plants=plants,
     )
+
