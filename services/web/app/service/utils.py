@@ -29,7 +29,7 @@ STATUS_CONFIG = {
     "TS":  {"label": "TOOLING SETTING",  "group": "setup",    "priority": 40,  "setup": True},
     "TL":  {"label": "TRIAL",            "group": "setup",    "priority": 40,  "setup": True},
     "CM":  {"label": "CHANGE MATERIAL",  "group": "setup",    "priority": 40},
-    "NP":  {"label": "NO SCHEDULE",      "group": "no_plan",  "priority": 30,  "non_machine": True, "no_plan": True},
+    "NP":  {"label": "NO PLAN",          "group": "no_plan",  "priority": 30,  "non_machine": True, "no_plan": True},
     "BT":  {"label": "BREAKTIME",        "group": "no_plan",  "priority": 20,  "non_machine": True},
     "BR":  {"label": "BRIEFING",         "group": "no_plan",  "priority": 20,  "non_machine": True},
     "RP":  {"label": "REPORTING",        "group": "no_plan",  "priority": 20},
@@ -42,7 +42,8 @@ NON_MACHINE_CODES: frozenset[str] = frozenset(c for c, cfg in STATUS_CONFIG.item
 SETUP_CODES: frozenset[str]       = frozenset(c for c, cfg in STATUS_CONFIG.items() if cfg.get("setup"))
 NO_PLAN_CODES: frozenset[str]     = frozenset(c for c, cfg in STATUS_CONFIG.items() if cfg.get("no_plan"))
 
-# Full-string lists ("CODE : Label") for SQL .in_() filters in business_logic.
+# Canonical display labels. Business rules must compare category codes rather
+# than these full strings so a historical label change cannot alter behavior.
 NON_MACHINE_CATEGORY: list[str] = [f"{c} : {cfg['label'].title()}" for c, cfg in STATUS_CONFIG.items() if cfg.get("non_machine")]
 SETUP_CATEGORY: list[str]       = [f"{c} : {cfg['label'].title()}" for c, cfg in STATUS_CONFIG.items() if cfg.get("setup")]
 NO_PLAN_CATEGORY: list[str]     = [f"{c} : {cfg['label'].title()}" for c, cfg in STATUS_CONFIG.items() if cfg.get("no_plan")]

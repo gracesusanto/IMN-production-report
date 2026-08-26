@@ -117,14 +117,10 @@ def post_activity(activity: schema.Activity, session=Sessioner):
     4. Start a new activity with next category, the newly created mesin_log entry as start id, and null stop id
     """
 
-    def normalize_null(value):
-        """Convert 'null' (string), None, or empty strings to None."""
-        return None if value in ["null", None, ""] else value
-
     # Normalize inputs
-    activity.curr_category = normalize_null(activity.curr_category)
-    activity.mesin_id = normalize_null(activity.mesin_id)
-    activity.tooling_id = normalize_null(activity.tooling_id)
+    activity.curr_category = business_logic.normalize_optional_identifier(activity.curr_category)
+    activity.mesin_id = business_logic.normalize_optional_identifier(activity.mesin_id)
+    activity.tooling_id = business_logic.normalize_optional_identifier(activity.tooling_id)
 
     # Operator must always exist
     if not session.query(models.Operator).filter(models.Operator.id == activity.operator_id).first():

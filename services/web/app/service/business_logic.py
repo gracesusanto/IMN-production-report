@@ -39,6 +39,33 @@ def is_non_machine_category(category: str) -> bool:
 def is_setup_category(category: str) -> bool:
     return _category_code(category) in SETUP_CODES
 
+
+def _category_code_condition(column, categories):
+    """Build a SQL condition matching category codes, independent of labels."""
+    codes = {_category_code(category) for category in categories}
+    codes.discard("")
+    return or_(
+        *(
+            or_(
+                column == code,
+                column.startswith(f"{code}:"),
+                column.startswith(f"{code} :"),
+            )
+            for code in codes
+        )
+    )
+
+
+def normalize_optional_identifier(value):
+    """Normalize empty values and frontend sentinel strings to ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if value.lower() in {"", "null", "none"}:
+            return None
+    return value
+
 def get_operator_active_machines(operator_id: str, exclude: list[str], session):
     """
     Retrieve all active machines that an operator is currently working on,
@@ -48,7 +75,13 @@ def get_operator_active_machines(operator_id: str, exclude: list[str], session):
         session.query(models.ActivityMesin)
         .filter(models.ActivityMesin.operator_id == operator_id)
         .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
-        .filter(~models.ActivityMesin.category.in_(exclude))  # Exclude exact matches
+        .filter(~_category_code_condition(models.ActivityMesin.category, exclude))
+        .filter(
+            models.ActivityMesin.mesin_id.isnot(None),
+            models.ActivityMesin.mesin_id != "",
+            models.ActivityMesin.tooling_id.isnot(None),
+            models.ActivityMesin.tooling_id != "",
+        )
         .all()
     )
 
@@ -64,7 +97,7 @@ def get_machine_active_operators(mesin_id, exclude: list[str], session):
         session.query(models.ActivityMesin)
         .filter(models.ActivityMesin.mesin_id == mesin_id)
         .filter(models.ActivityMesin.stop_time_id.is_(None))  # Only active activities
-        .filter(~models.ActivityMesin.category.in_(exclude))  # Exclude exact matches
+        .filter(~_category_code_condition(models.ActivityMesin.category, exclude))
         .all()
     )
 
@@ -135,7 +168,7 @@ def process_activity(activity, session):
 
     non_machine_branch = and_(
         base_active,
-        models.ActivityMesin.category.in_(NON_MACHINE_CATEGORY),
+        _category_code_condition(models.ActivityMesin.category, NON_MACHINE_CODES),
     )
 
     chosen_filters = [
@@ -144,7 +177,7 @@ def process_activity(activity, session):
     ]
 
     # only restrict mesin/tooling for machine categories
-    if curr_category and curr_category not in NON_MACHINE_CATEGORY:
+    if curr_category and not is_non_machine_category(curr_category):
         chosen_filters.append(models.ActivityMesin.mesin_id == mesin_id)
         if tooling_id:
             chosen_filters.append(models.ActivityMesin.tooling_id == tooling_id)
@@ -161,7 +194,7 @@ def process_activity(activity, session):
         a.stop_time_id = new_log.id
 
         # non-machine: stop only (don’t overwrite details)
-        if a.category in NON_MACHINE_CATEGORY:
+        if is_non_machine_category(a.category):
             continue
 
         # machine / chosen-category: persist production details
